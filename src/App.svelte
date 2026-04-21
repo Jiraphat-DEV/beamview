@@ -73,6 +73,27 @@
   async function handlePickerConfirm(videoId: string, audioId: string | null) {
     pickerOpen = false;
     await stream.acquire(videoId, audioId);
+    if (stream.status === 'active') {
+      await rememberDeviceSelection(videoId, audioId);
+    }
+  }
+
+  /** Persist the in-use device IDs so the next launch can auto-acquire
+   *  them (spec §17.1 recommendation B). These are resume hints rather
+   *  than user settings — other config fields still require an explicit
+   *  Save action from the SettingsModal (Milestone 6). */
+  async function rememberDeviceSelection(videoId: string, audioId: string | null) {
+    try {
+      const cfg = await commands.loadConfig();
+      await commands.saveConfig({
+        ...cfg,
+        last_video_device_id: videoId,
+        last_audio_device_id: audioId,
+      });
+      logger.info('saved last-used device', { videoId, audioId });
+    } catch (err) {
+      logger.warn('failed to save last-used device', { err: String(err) });
+    }
   }
   function handlePickerClose() {
     pickerOpen = false;

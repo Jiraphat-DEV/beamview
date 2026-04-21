@@ -1,6 +1,6 @@
 <script lang="ts">
   import { RefreshCcw } from 'lucide-svelte';
-  import { requestPermission } from '$lib/capture/devices';
+  import { displayLabel, requestPermission } from '$lib/capture/devices';
   import { devices } from '$lib/stores/devices.svelte';
   import { logger } from '$lib/logger';
 
@@ -16,10 +16,10 @@
   let requesting = $state(false);
 
   // Devices list is considered "missing permission" when there are no
-  // video devices OR every returned device has an empty label (macOS
-  // hides labels until permission is granted).
+  // video devices OR every returned device has no label (macOS hides
+  // labels behind the permission prompt).
   const needsPermission = $derived(
-    devices.ready && (devices.video.length === 0 || devices.video.every((d) => !d.label.length)),
+    devices.ready && (devices.video.length === 0 || devices.video.every((d) => d.label === null)),
   );
 
   $effect(() => {
@@ -81,7 +81,7 @@
       <span class="label">Video</span>
       <select bind:value={devices.videoId}>
         {#each devices.video as d (d.deviceId)}
-          <option value={d.deviceId}>{d.label}</option>
+          <option value={d.deviceId}>{displayLabel(d)}</option>
         {/each}
       </select>
     </label>
@@ -91,7 +91,7 @@
       <select bind:value={devices.audioId}>
         <option value={null}>Disabled</option>
         {#each devices.audio as d (d.deviceId)}
-          <option value={d.deviceId}>{d.label}</option>
+          <option value={d.deviceId}>{displayLabel(d)}</option>
         {/each}
       </select>
     </label>

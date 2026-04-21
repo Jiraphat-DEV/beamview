@@ -2,7 +2,9 @@ import { PERMISSION_PROBE_CONSTRAINTS } from './constraints';
 
 export interface CaptureDevice {
   deviceId: string;
-  label: string;
+  /** `null` when the label is empty — typically because media permission
+   *  has not been granted yet and the OS is hiding device names. */
+  label: string | null;
   groupId: string;
 }
 
@@ -13,9 +15,15 @@ export interface EnumeratedDevices {
 
 const toCaptureDevice = (d: MediaDeviceInfo): CaptureDevice => ({
   deviceId: d.deviceId,
-  label: d.label || `Unnamed (${d.deviceId.slice(0, 8)})`,
+  label: d.label ? d.label : null,
   groupId: d.groupId,
 });
+
+/** Render-time helper: format a device for display, falling back to a
+ *  placeholder when the label is null (permission not yet granted). */
+export function displayLabel(device: CaptureDevice): string {
+  return device.label ?? `Unnamed (${device.deviceId.slice(0, 8)})`;
+}
 
 /** Enumerate video (camera) and audio (microphone) inputs.
  *

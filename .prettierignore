@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock
+src-tauri/icons/
+assets/
+static/
+temp_project_BEAMVIEW/
+pnpm-lock.yaml
+CHANGELOG.md

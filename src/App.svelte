@@ -16,11 +16,7 @@
     align-items: center;
     justify-content: center;
     gap: 12px;
-    font-family:
-      'Helvetica Neue',
-      Inter,
-      Arial,
-      sans-serif;
+    font-family: 'Helvetica Neue', Inter, Arial, sans-serif;
     background: #faf9f6;
     color: #1a1a1a;
   }

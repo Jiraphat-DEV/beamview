@@ -12,21 +12,35 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
-    "check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "typecheck:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
+    "lint": "pnpm run lint:prettier && pnpm run lint:eslint && pnpm run lint:rust",
+    "lint:prettier": "prettier --check .",
+    "lint:eslint": "eslint .",
+    "lint:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "lint:fix": "prettier --write . && eslint --fix .",
+    "format": "prettier --write . && cargo fmt --manifest-path src-tauri/Cargo.toml",
+    "clean": "rm -rf node_modules dist src-tauri/target"
   },
   "dependencies": {
     "@tauri-apps/api": "^2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tauri-apps/cli": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-log": "^2.8.0",
+    "eslint": "^10.2.1",
+    "eslint-plugin-svelte": "^3.17.0",
+    "globals": "^17.5.0",
+    "prettier": "^3.8.3",
+    "prettier-plugin-svelte": "^3.5.1",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "~5.6.2",
+    "typescript-eslint": "^8.59.0",
     "vite": "^6.0.3"
   }
 }

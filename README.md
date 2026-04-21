@@ -37,13 +37,15 @@ Vite serves the frontend at `http://localhost:1420`. Tauri launches a native win
 
 ## Scripts
 
-| Command | Purpose |
-| --- | --- |
-| `pnpm dev` | Vite dev server only |
-| `pnpm tauri dev` | Full app (Rust + Vite with hot reload) |
-| `pnpm build` | Production frontend build |
-| `pnpm tauri build` | Bundled `.dmg` (macOS) |
-| `pnpm check` | `svelte-check` TypeScript + Svelte validation |
+| Command            | Purpose                                          |
+| ------------------ | ------------------------------------------------ |
+| `pnpm dev`         | Vite dev server only                             |
+| `pnpm tauri dev`   | Full app (Rust + Vite with hot reload)           |
+| `pnpm build`       | Production frontend build                        |
+| `pnpm tauri build` | Bundled `.dmg` (macOS)                           |
+| `pnpm typecheck`   | `svelte-check` TypeScript + Svelte validation    |
+| `pnpm lint`        | Prettier + ESLint + `cargo fmt --check` + clippy |
+| `pnpm format`      | Auto-fix formatting (Prettier + `cargo fmt`)     |
 
 ## Project layout
 

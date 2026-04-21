@@ -31,6 +31,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit tests for config round-trip, migration, atomic write, reset
 - TypeScript IPC layer (`src/lib/ipc/{types,commands,index}.ts`)
   mirroring the Rust surface
+- **UI shell (Milestone 3)**: design token system (`src/app.css`) with
+  brand palette (sumi/stone/mist/paper/vermilion + dark variants),
+  typography stack (Helvetica Neue / Inter / JetBrains Mono), motion
+  (cubic-bezier(0.4,0,0.2,1), 150/250/400ms), spacing scale
+- Theme store (`src/lib/stores/theme.svelte.ts`) — Svelte 5 runes
+  class with `pref`, `resolved`, `ready`. Subscribes to
+  `prefers-color-scheme` so the UI tracks macOS dark-mode toggles
+- Layout components (`src/lib/components/`): `TitleBar`, `ActionBar`
+  (Fullscreen + Settings Lucide icons), `EmptyState`
+- `App.svelte` restructured to three-region layout
+  (TitleBar / main / ActionBar) with EmptyState placeholder
+- `main.ts` sets `documentElement[data-theme]` synchronously before
+  mount to prevent a light-mode flash on dark systems
+- `$lib` alias in `vite.config.ts` matching the tsconfig path mapping
 
 ### Decisions
 

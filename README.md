@@ -92,6 +92,7 @@ to test capture.
 | `pnpm build`       | Production frontend build                                |
 | `pnpm tauri build` | Bundled `.dmg` (macOS)                                   |
 | `pnpm typecheck`   | `svelte-check` TypeScript + Svelte validation            |
+| `pnpm test:rust`   | `cargo test` for the Rust backend                        |
 | `pnpm lint`        | Prettier + ESLint + `cargo fmt --check` + clippy         |
 | `pnpm format`      | Auto-fix formatting (Prettier + `cargo fmt`)             |
 

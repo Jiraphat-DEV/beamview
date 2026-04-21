@@ -45,6 +45,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `main.ts` sets `documentElement[data-theme]` synchronously before
   mount to prevent a light-mode flash on dark systems
 - `$lib` alias in `vite.config.ts` matching the tsconfig path mapping
+- **Capture pipeline (Milestone 4)**: `$lib/capture/constraints.ts`
+  builds MediaStreamConstraints with the critical
+  `echoCancellation:false / noiseSuppression:false /
+  autoGainControl:false` audio trio per spec §5.3
+- `$lib/capture/devices.ts` — `enumerateCaptureDevices()`,
+  `requestPermission()` probe, `preferDevice()` fallback picker
+- `$lib/audio/context.ts` — Web Audio routing (AudioContext
+  latencyHint:'interactive', 48 kHz) with a Gain node for
+  future volume/mute
+- `devices` store (refresh, restoreSelection) and `stream`
+  store (acquire / release / status machine with kind-classified
+  `StreamError`). Track `ended` event flips status to
+  `error` with kind `disconnected`
+- `VideoView.svelte` — muted `<video>` bound to `stream.value`
+  with `disablepictureinpicture` + `disableremoteplayback`
+- `DevicePicker.svelte` — native `<dialog>` with video + audio
+  dropdowns, Grant-access fallback when labels are empty, and
+  Refresh button
+- `App.svelte` wires the picker, auto-acquires the saved device
+  on startup when labels indicate media permission is granted
+  (spec §17.1 recommendation B), and renders an error panel with
+  a "Choose device" recovery when the stream fails
 
 ### Decisions
 

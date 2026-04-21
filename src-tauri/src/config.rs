@@ -23,6 +23,10 @@ pub struct AppConfig {
     pub last_audio_device_id: Option<String>,
     pub theme: Theme,
     pub hotkeys: HashMap<String, String>,
+    /// True once the user has completed (or dismissed) the first-run
+    /// Welcome flow. Gates the welcome screen rendering in the UI.
+    /// Added in Milestone 6; absent in older configs → serde default (false).
+    pub welcome_dismissed: bool,
 }
 
 impl Default for AppConfig {
@@ -33,6 +37,7 @@ impl Default for AppConfig {
             last_audio_device_id: None,
             theme: Theme::System,
             hotkeys: default_hotkeys(),
+            welcome_dismissed: false,
         }
     }
 }
@@ -143,10 +148,23 @@ mod tests {
             last_audio_device_id: Some("audio-xyz".into()),
             theme: Theme::Dark,
             hotkeys: default_hotkeys(),
+            welcome_dismissed: true,
         };
         save(&cfg, &path).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded, cfg);
+    }
+
+    #[test]
+    fn load_without_welcome_dismissed_defaults_false() {
+        // Older configs (pre-Milestone 6) have no welcome_dismissed key —
+        // serde(default) should yield `false` so first-run UX re-runs.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"schema_version": 1, "theme": "light"}"#).unwrap();
+        let cfg = load(&path).unwrap();
+        assert!(!cfg.welcome_dismissed);
+        assert_eq!(cfg.theme, Theme::Light);
     }
 
     #[test]

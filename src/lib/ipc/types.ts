@@ -10,6 +10,8 @@ export interface AppConfig {
   last_audio_device_id: string | null;
   theme: Theme;
   hotkeys: Record<string, string>;
+  /** True once the user has completed the first-run Welcome flow. */
+  welcome_dismissed: boolean;
 }
 
 export const DEFAULT_HOTKEYS: Readonly<Record<string, string>> = Object.freeze({

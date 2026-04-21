@@ -27,3 +27,6 @@ thiserror = "1"
 tracing = "0.1"
 tokio = { version = "1", features = ["full"] }
 directories = "5"
+
+[dev-dependencies]
+tempfile = "3"

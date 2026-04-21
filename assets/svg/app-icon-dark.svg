@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Beamview app icon (dark)</title>
+  <desc>The official Beamview application icon with Ink background.</desc>
+  <rect width="1024" height="1024" fill="#0F0F0E"/>
+  <g transform="translate(512, 512)">
+    <circle cx="0" cy="0" r="240" fill="none" stroke="#E8E6DE" stroke-width="14"/>
+    <line x1="0" y1="-300" x2="0" y2="0" stroke="#E8E6DE" stroke-width="14" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="28" fill="#E8E6DE"/>
+  </g>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Beamview splash icon</title>
+  <desc>Splash screen variant with vermilion center, evoking a Japanese hanko seal.</desc>
+  <rect width="1024" height="1024" fill="#FAF9F6"/>
+  <g transform="translate(512, 512)">
+    <circle cx="0" cy="0" r="240" fill="none" stroke="#1a1a1a" stroke-width="14"/>
+    <line x1="0" y1="-300" x2="0" y2="0" stroke="#1a1a1a" stroke-width="14" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="32" fill="#D85A30"/>
+  </g>
+</svg>

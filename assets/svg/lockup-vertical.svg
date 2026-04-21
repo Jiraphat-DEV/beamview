@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" width="240" height="180">
+  <title>Beamview vertical lockup</title>
+  <desc>The logo mark positioned above the wordmark, used for app icons and splash screens.</desc>
+  <g transform="translate(88, 24)">
+    <circle cx="32" cy="32" r="30" fill="none" stroke="#1a1a1a" stroke-width="1.5"/>
+    <line x1="32" y1="4" x2="32" y2="32" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round"/>
+    <circle cx="32" cy="32" r="3" fill="#1a1a1a"/>
+  </g>
+  <text x="120" y="148"
+        text-anchor="middle"
+        font-family="'Helvetica Neue', 'Inter', 'Segoe UI', system-ui, sans-serif"
+        font-size="22"
+        font-weight="300"
+        letter-spacing="2"
+        fill="#1a1a1a">beamview</text>
+</svg>

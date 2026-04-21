@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 48" width="320" height="48">
+  <title>Beamview wordmark (dark mode)</title>
+  <text x="160" y="30"
+        text-anchor="middle"
+        font-family="'Helvetica Neue', 'Inter', 'Segoe UI', system-ui, sans-serif"
+        font-size="28"
+        font-weight="300"
+        letter-spacing="2"
+        fill="#E8E6DE">beamview</text>
+</svg>

@@ -71,8 +71,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 /// else is a `PredefinedMenuItem` handled by Tauri.
 pub fn handle_event<R: Runtime>(app: &AppHandle<R>, event_id: &str) {
     if event_id == PREFERENCES_ID {
-        if let Err(e) = app.emit(PREFERENCES_EVENT, ()) {
-            log::warn!("failed to emit preferences event: {e}");
+        match app.emit(PREFERENCES_EVENT, ()) {
+            Ok(()) => log::info!("preferences menu clicked — emitted {PREFERENCES_EVENT}"),
+            Err(e) => log::warn!("failed to emit preferences event: {e}"),
         }
     }
 }

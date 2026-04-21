@@ -1,16 +1,152 @@
+/* Beamview global tokens & base styles.
+ *
+ * Brand palette from PROJECT_SPEC §3.4. Semantic tokens (bv-bg, bv-text, …)
+ * remap per theme so components never need to branch on light/dark.
+ * The theme store sets `document.documentElement.dataset.theme` to
+ * `light` or `dark` (resolved from the user's system or saved choice).
+ */
+
+:root {
+  /* Brand primitives — light */
+  --bv-sumi: #1a1a1a;
+  --bv-stone: #5f5e5a;
+  --bv-mist: #b4b2a9;
+  --bv-paper: #faf9f6;
+  --bv-vermilion: #d85a30;
+
+  /* Brand primitives — dark */
+  --bv-ink-dark: #0f0f0e;
+  --bv-surface-dark: #1c1c1a;
+  --bv-text-dark: #e8e6de;
+  --bv-text-muted-dark: #8a8984;
+  --bv-vermilion-dark: #e87552;
+
+  /* Typography stack */
+  --bv-font-display:
+    'Helvetica Neue', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --bv-font-body: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --bv-font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Motion */
+  --bv-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --bv-dur-fast: 150ms;
+  --bv-dur-med: 250ms;
+  --bv-dur-slow: 400ms;
+
+  /* 8pt-ish spacing scale */
+  --bv-space-1: 4px;
+  --bv-space-2: 8px;
+  --bv-space-3: 12px;
+  --bv-space-4: 16px;
+  --bv-space-5: 20px;
+  --bv-space-6: 24px;
+  --bv-space-8: 32px;
+  --bv-space-12: 48px;
+
+  /* Chrome heights per spec §5.4 */
+  --bv-titlebar-h: 40px;
+  --bv-actionbar-h: 44px;
+
+  /* Default semantic (light) — [data-theme='dark'] remaps these below */
+  --bv-bg: var(--bv-paper);
+  --bv-surface: #ffffff;
+  --bv-text: var(--bv-sumi);
+  --bv-text-muted: var(--bv-stone);
+  --bv-text-subtle: var(--bv-mist);
+  --bv-border: rgba(26, 26, 26, 0.12);
+  --bv-accent: var(--bv-vermilion);
+  --bv-video-bg: #000000;
+}
+
+:root[data-theme='dark'] {
+  --bv-bg: var(--bv-ink-dark);
+  --bv-surface: var(--bv-surface-dark);
+  --bv-text: var(--bv-text-dark);
+  --bv-text-muted: var(--bv-text-muted-dark);
+  --bv-text-subtle: #5f5e5a;
+  --bv-border: rgba(232, 230, 222, 0.08);
+  --bv-accent: var(--bv-vermilion-dark);
+  --bv-video-bg: #000000;
+}
+
+/* Reset */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
-body {
+body,
+#app {
   margin: 0;
   padding: 0;
   height: 100%;
 }
 
 body {
-  font-family: 'Helvetica Neue', Inter, Arial, sans-serif;
+  font-family: var(--bv-font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--bv-text);
+  background: var(--bv-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow: hidden; /* window itself should scroll, not the body */
 }
 
-#app {
-  height: 100%;
+/* Typography primitives */
+h1,
+h2,
+h3 {
+  font-family: var(--bv-font-display);
+  margin: 0;
+}
+
+h1 {
+  font-weight: 300;
+  font-size: 32px;
+  letter-spacing: 1px;
+}
+
+h2 {
+  font-weight: 300;
+  font-size: 24px;
+  letter-spacing: 0.5px;
+}
+
+h3 {
+  font-weight: 400;
+  font-size: 18px;
+}
+
+p {
+  margin: 0;
+}
+
+.bv-mono {
+  font-family: var(--bv-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.bv-caption {
+  font-size: 11px;
+  color: var(--bv-text-subtle);
+}
+
+/* Focus — keep visible for accessibility, tone it down per brand */
+:focus-visible {
+  outline: 2px solid var(--bv-accent);
+  outline-offset: 2px;
+}
+
+/* Buttons — base reset, variant classes layer on top */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
 }

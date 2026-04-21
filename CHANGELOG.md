@@ -103,6 +103,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Toast.svelte` + `ui.showToast(msg, kind)` surface non-blocking
   confirmations (Save succeeded, device switch failed, etc.)
   bottom-right above the ActionBar
+- **Polish (Milestone 7)**: Beamview brand icon replaces the
+  default Tauri mark across `src-tauri/icons/` (`.icns`, `.ico`,
+  plus every size `tauri.conf.json` references). Sourced from
+  `assets/svg/app-icon-light.svg` via `rsvg-convert` + `tauri icon`.
+- `LoadingState.svelte` renders while `stream.status === 'acquiring'`
+  — wordmark + "Connecting to device…" + a thin Vermilion pulse.
+- Auto-hide chrome (spec §5.4.1): TitleBar + ActionBar fade off-edge
+  after 2 s of mouse inactivity while stream is active and no modal
+  is open. Mousemove anywhere restores them instantly.
+- Favicon wired into `index.html` for the dev-mode Safari tab.
 
 ### Decisions
 

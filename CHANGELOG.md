@@ -67,6 +67,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on startup when labels indicate media permission is granted
   (spec §17.1 recommendation B), and renders an error panel with
   a "Choose device" recovery when the stream fails
+- **Fullscreen + hotkeys (Milestone 5)**: Rust `toggle_fullscreen`
+  and `is_fullscreen` commands with
+  `core:window:allow-set-fullscreen` + `allow-is-fullscreen`
+  capability grants
+- `$lib/hotkeys/registry.ts` — single window keydown listener with
+  a priority-ordered binding list so Esc closes the top modal
+  before exiting fullscreen (spec §17.2). Inputs, textareas, and
+  contenteditable targets are excluded automatically
+- `$lib/stores/ui.svelte.ts` — `muted` state + `modalStack` for the
+  Esc priority stack; `toggleMute` drives the `audio/context`
+  GainNode in place without tearing down the Web Audio graph
+- Hotkey bindings wired in `App.svelte`: Cmd+F + F11 toggle
+  fullscreen, Cmd+M mutes, Cmd+, opens settings placeholder, Esc
+  closes top modal else exits fullscreen
+- `menu://preferences` event (emitted by the native menu since
+  Milestone 2) now has a frontend listener — both the menu item
+  and Cmd+, hit the same handler
+- `TitleBar` gains a `muted` status label so mute state is visible
+  without opening devtools
 
 ### Decisions
 

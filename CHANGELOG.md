@@ -7,128 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-04-21
+
+Initial MVP — macOS-only, unsigned. Proof that Beamview can replace
+OBS + QuickTime for the narrow use case of playing a console through
+a capture card on a Mac.
+
 ### Added
 
-- Tauri v2 scaffold with plain Svelte 5 + TypeScript frontend (Vite 6)
-- Project metadata: `com.beamview.app` identifier, Entertainment category,
-  window defaults (1280×720, min 640×360)
-- macOS bundle config targeting macOS 13+
-- `src-tauri/Info.plist` with `NSCameraUsageDescription` and
-  `NSMicrophoneUsageDescription` (required to avoid crash on
-  `getUserMedia()` for capture card access)
-- LICENSE (MIT), README, CHANGELOG, `.editorconfig`
-- **Rust shell (Milestone 2)**: `config.rs` with `AppConfig`, atomic
-  save (`tmp` + `rename`), schema-version migration, and `ConfigError`
-  via `thiserror`
-- IPC commands (`load_config`, `save_config`, `reset_config`,
-  `get_app_version`, `quit_app`) returning `Result<T, String>` for
-  TS-side error handling
-- `logging.rs` wires `tauri-plugin-log` with stdout + file
-  (`~/Library/Logs/com.beamview.app/beamview.log`) + webview console
-  targets; panic hook routes Rust panics through `log::error!`
-- Native macOS menu stub (`Beamview`, `Edit` submenus); Preferences…
-  emits a `menu://preferences` event for the future SettingsModal
-- Unit tests for config round-trip, migration, atomic write, reset
-- TypeScript IPC layer (`src/lib/ipc/{types,commands,index}.ts`)
-  mirroring the Rust surface
-- **UI shell (Milestone 3)**: design token system (`src/app.css`) with
-  brand palette (sumi/stone/mist/paper/vermilion + dark variants),
-  typography stack (Helvetica Neue / Inter / JetBrains Mono), motion
-  (cubic-bezier(0.4,0,0.2,1), 150/250/400ms), spacing scale
-- Theme store (`src/lib/stores/theme.svelte.ts`) — Svelte 5 runes
-  class with `pref`, `resolved`, `ready`. Subscribes to
-  `prefers-color-scheme` so the UI tracks macOS dark-mode toggles
-- Layout components (`src/lib/components/`): `TitleBar`, `ActionBar`
-  (Fullscreen + Settings Lucide icons), `EmptyState`
-- `App.svelte` restructured to three-region layout
-  (TitleBar / main / ActionBar) with EmptyState placeholder
-- `main.ts` sets `documentElement[data-theme]` synchronously before
-  mount to prevent a light-mode flash on dark systems
-- `$lib` alias in `vite.config.ts` matching the tsconfig path mapping
-- **Capture pipeline (Milestone 4)**: `$lib/capture/constraints.ts`
-  builds MediaStreamConstraints with the critical
-  `echoCancellation:false / noiseSuppression:false /
-  autoGainControl:false` audio trio per spec §5.3
-- `$lib/capture/devices.ts` — `enumerateCaptureDevices()`,
-  `requestPermission()` probe, `preferDevice()` fallback picker
-- `$lib/audio/context.ts` — Web Audio routing (AudioContext
-  latencyHint:'interactive', 48 kHz) with a Gain node for
-  future volume/mute
-- `devices` store (refresh, restoreSelection) and `stream`
-  store (acquire / release / status machine with kind-classified
-  `StreamError`). Track `ended` event flips status to
-  `error` with kind `disconnected`
-- `VideoView.svelte` — muted `<video>` bound to `stream.value`
-  with `disablepictureinpicture` + `disableremoteplayback`
-- `DevicePicker.svelte` — native `<dialog>` with video + audio
-  dropdowns, Grant-access fallback when labels are empty, and
-  Refresh button
-- `App.svelte` wires the picker, auto-acquires the saved device
-  on startup when labels indicate media permission is granted
-  (spec §17.1 recommendation B), and renders an error panel with
-  a "Choose device" recovery when the stream fails
+- **Scaffold (Milestone 1)**: Tauri v2 + plain Svelte 5 + TypeScript
+  (Vite 6), MIT LICENSE, README, CHANGELOG, GitHub Actions CI
+  (lint + typecheck + rust tests + tauri debug build), prettier +
+  eslint + rustfmt + clippy chain.
+- **Rust shell (Milestone 2)**: `AppConfig` with atomic `save()`
+  (tmp + rename), `thiserror`-based `ConfigError`, schema-version
+  migration; IPC commands `load_config`, `save_config`,
+  `reset_config`, `get_app_version`, `quit_app`; `tauri-plugin-log`
+  wired to stdout + `~/Library/Logs/com.beamview.app/beamview.log`
+  + webview console with a panic hook; native macOS menu (Beamview,
+  Edit) with Preferences… emitting `menu://preferences`; Rust unit
+  tests for config round-trip, migration, atomic write, reset.
+- **UI shell (Milestone 3)**: full design-token system with the
+  brand palette (sumi / stone / mist / paper / vermilion + dark
+  variants), typography stack (Helvetica Neue / Inter / JetBrains
+  Mono), motion + spacing scale; theme store with `prefers-color-scheme`
+  subscription; `TitleBar`, `ActionBar`, `EmptyState`; `$lib` alias.
+- **Capture pipeline (Milestone 4)**: `getUserMedia` with the
+  critical audio trio off (`echoCancellation`, `noiseSuppression`,
+  `autoGainControl` = false) per spec §5.3; Web Audio pipeline
+  (AudioContext + GainNode) so `<video>` stays muted; `devices`
+  and `stream` stores with a `StreamError` kind machine;
+  `VideoView.svelte` and `DevicePicker.svelte`; auto-acquire of
+  the last-used device on startup (spec §17.1).
 - **Fullscreen + hotkeys (Milestone 5)**: Rust `toggle_fullscreen`
-  and `is_fullscreen` commands with
-  `core:window:allow-set-fullscreen` + `allow-is-fullscreen`
-  capability grants
-- `$lib/hotkeys/registry.ts` — single window keydown listener with
-  a priority-ordered binding list so Esc closes the top modal
-  before exiting fullscreen (spec §17.2). Inputs, textareas, and
-  contenteditable targets are excluded automatically
-- `$lib/stores/ui.svelte.ts` — `muted` state + `modalStack` for the
-  Esc priority stack; `toggleMute` drives the `audio/context`
-  GainNode in place without tearing down the Web Audio graph
-- Hotkey bindings wired in `App.svelte`: Cmd+F + F11 toggle
-  fullscreen, Cmd+M mutes, Cmd+, opens settings placeholder, Esc
-  closes top modal else exits fullscreen
-- `menu://preferences` event (emitted by the native menu since
-  Milestone 2) now has a frontend listener — both the menu item
-  and Cmd+, hit the same handler
-- `TitleBar` gains a `muted` status label so mute state is visible
-  without opening devtools
-- **Settings + Welcome (Milestone 6)**: AppConfig gains
-  `welcome_dismissed: bool` so the first-run Welcome flow only
-  shows until the user completes it. `serde(default)` keeps older
-  configs working — covered by a new Rust test
-- `WelcomeScreen.svelte` (first-run explainer with Grant access /
-  Skip); auto-acquire is now gated on `welcome_dismissed` so we
-  never fire `getUserMedia` before the user sees the rationale
-- `SettingsModal.svelte` with Video / Audio / About tabs, local
-  form state + `dirty` flag driving an explicit Save button per
-  spec §8.6. Volume + mute live-apply through `ui` store;
-  `theme` + device IDs persist through Rust `saveConfig`
-- `ErrorOverlay.svelte` replaces the inline error-panel in App
-  with a reusable component that takes title / message / up to
-  two actions
-- `Toast.svelte` + `ui.showToast(msg, kind)` surface non-blocking
-  confirmations (Save succeeded, device switch failed, etc.)
-  bottom-right above the ActionBar
-- **Polish (Milestone 7)**: Beamview brand icon replaces the
-  default Tauri mark across `src-tauri/icons/` (`.icns`, `.ico`,
-  plus every size `tauri.conf.json` references). Sourced from
-  `assets/svg/app-icon-light.svg` via `rsvg-convert` + `tauri icon`.
-- `LoadingState.svelte` renders while `stream.status === 'acquiring'`
-  — wordmark + "Connecting to device…" + a thin Vermilion pulse.
-- Auto-hide chrome (spec §5.4.1): TitleBar + ActionBar fade off-edge
-  after 2 s of mouse inactivity while stream is active and no modal
-  is open. Mousemove anywhere restores them instantly.
-- Favicon wired into `index.html` for the dev-mode Safari tab.
+  and `is_fullscreen` commands; `$lib/hotkeys/registry.ts` with an
+  Esc priority stack; Cmd+F / F11 (fullscreen), Cmd+M (mute),
+  Cmd+, (settings), Esc (top modal else exit fullscreen);
+  `menu://preferences` bridge so the menu item and Cmd+, fire the
+  same handler.
+- **Settings + Welcome (Milestone 6)**: `welcome_dismissed: bool`
+  config field gating first-run UI; `WelcomeScreen.svelte`;
+  `SettingsModal.svelte` with Video / Audio / About tabs, local
+  form state + `dirty` flag + explicit Save per spec §8.6;
+  `ErrorOverlay.svelte` + `Toast.svelte` + `ui.showToast()`.
+- **Polish (Milestone 7)**: Beamview brand icons across
+  `src-tauri/icons/` generated from `assets/svg/app-icon-light.svg`
+  via `rsvg-convert` + `tauri icon`; `LoadingState.svelte` during
+  stream acquisition; auto-hide TitleBar + ActionBar after 2 s of
+  inactivity while the stream is active and no modal is open
+  (spec §5.4.1); favicon wired into `index.html`.
+- **Release prep (Milestone 8)**: GitHub Actions `release.yml`
+  triggered by `v*` tag — builds the macOS bundle and attaches
+  the `.dmg` to a draft release via `tauri-action`.
+  [`docs/MANUAL_TEST.md`](docs/MANUAL_TEST.md) captures the
+  spec §9.3 ten-point acceptance checklist.
+
+### Known issues
+
+- App is unsigned. macOS Gatekeeper blocks the first launch — users
+  must Ctrl-click → Open once.
+- `pnpm tauri dev` runs the binary raw without the `.app` wrapper,
+  so macOS camera/mic permission prompts never appear. For capture
+  testing use `pnpm tauri build --debug` and open the bundled `.app`.
+- Rebuilds can invalidate cached TCC permissions — users may need
+  to re-grant camera + microphone access each time the binary hash
+  changes.
 
 ### Decisions
 
-- **Svelte flavor:** plain Svelte + Vite instead of the SvelteKit boilerplate
-  that `create-tauri-app` ships. A single-window app does not need the Kit
-  adapter, `$app/*` imports, or file-based routing. Spec §4 already describes
-  the plain Svelte layout (`src/main.ts` + `src/App.svelte`).
-- **Vite version:** follow whatever `create-tauri-app` bundles. The draft
-  spec pinned "Vite 5.x"; the scaffold gave us Vite 6. Updated spec §2.1
-  accordingly — no reason to downgrade since Tauri v2 fully supports Vite 6.
-- **Tauri plugin-opener:** removed from the template. Not used in Phase 1.
-- **`log` crate (not `tracing`) for Rust logging in Milestone 2.**
-  `tauri-plugin-log` hooks the `log` macros directly; a `tracing → log`
-  bridge is unnecessary overhead for Phase 1. `tracing` stays in
-  `Cargo.toml` for when structured spans become useful.
-- **Rust `Info.plist` as a file, not inline JSON.** Tauri v2's
-  `bundle.macOS.infoPlist` config key expects a path string. Added
-  `src-tauri/Info.plist` which Tauri auto-discovers and merges with
-  the default bundle plist at build time.
+- **Plain Svelte over SvelteKit.** `create-tauri-app` ships the
+  Kit boilerplate; adapter-static + file-based routing buy nothing
+  for a single-window app. Spec §4 already describes the plain
+  layout (`src/main.ts` + `src/App.svelte`).
+- **Vite 6 over pinned 5.x.** The scaffold uses 6; Tauri v2 fully
+  supports it. No reason to downgrade.
+- **`log` crate over `tracing` for Phase 1.** `tauri-plugin-log`
+  hooks the `log` macros directly; a `tracing → log` bridge is
+  unnecessary overhead. `tracing` stays in `Cargo.toml` for future
+  structured spans.
+- **`Info.plist` as a file, not inline.** Tauri v2's
+  `bundle.macOS.infoPlist` key expects a path string. Added
+  `src-tauri/Info.plist` which Tauri auto-merges at build.
+- **Dropped `tauri-plugin-opener`** — unused in Phase 1.
+
+[Unreleased]: https://github.com/Jiraphat-DEV/beamview/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Jiraphat-DEV/beamview/releases/tag/v0.1.0

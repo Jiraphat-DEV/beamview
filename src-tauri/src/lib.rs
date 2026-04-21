@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod logging;
 mod menu;
+pub mod translation;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

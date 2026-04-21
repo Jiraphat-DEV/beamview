@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>Beamview needs access to your capture card, which appears as a camera to macOS.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Beamview needs access to your capture card's audio, which appears as a microphone to macOS.</string>
+</dict>
+</plist>

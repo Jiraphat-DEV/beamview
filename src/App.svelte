@@ -2,8 +2,10 @@
   import { listen } from '@tauri-apps/api/event';
   import { onDestroy, onMount } from 'svelte';
   import { commands } from '$lib/ipc';
+  import type { AppConfig } from '$lib/ipc';
   import { logger } from '$lib/logger';
   import * as hotkeys from '$lib/hotkeys/registry';
+  import { requestPermission } from '$lib/capture/devices';
   import { devices } from '$lib/stores/devices.svelte';
   import { stream } from '$lib/stores/stream.svelte';
   import { theme } from '$lib/stores/theme.svelte';
@@ -11,17 +13,26 @@
   import TitleBar from '$lib/components/TitleBar.svelte';
   import ActionBar from '$lib/components/ActionBar.svelte';
   import EmptyState from '$lib/components/EmptyState.svelte';
+  import ErrorOverlay from '$lib/components/ErrorOverlay.svelte';
   import VideoView from '$lib/components/VideoView.svelte';
   import DevicePicker from '$lib/components/DevicePicker.svelte';
+  import SettingsModal from '$lib/components/SettingsModal.svelte';
+  import Toast from '$lib/components/Toast.svelte';
+  import WelcomeScreen from '$lib/components/WelcomeScreen.svelte';
 
   let pickerOpen = $state(false);
+  let settingsOpen = $state(false);
+  let grantRequesting = $state(false);
+  let config = $state<AppConfig | null>(null);
   let uninstallHotkeys: (() => void) | null = null;
   let unlistenPreferences: (() => void) | null = null;
 
+  // Show Welcome until config is loaded AND user has dismissed it.
+  const showWelcome = $derived(config !== null && !config.welcome_dismissed);
+
   onMount(async () => {
-    // Install hotkeys + the menu event bridge FIRST so a later async
-    // failure in theme / devices / auto-acquire can't silently swallow
-    // Cmd+F / Cmd+M / Cmd+, / Preferences… .
+    // Install hotkeys + menu bridge before async work so a later failure
+    // can't silently swallow Cmd+F / Cmd+, etc.
     try {
       uninstallHotkeys = installHotkeys();
       logger.info('hotkeys installed');
@@ -54,16 +65,15 @@
 
     await devices.refresh();
 
-    // Auto-restore the last-used device per spec §17.1 recommendation B.
-    // WKWebView on macOS may rotate / withhold deviceIds before camera
-    // permission is granted, so a saved ID can be "missing" from the
-    // enum yet still valid for getUserMedia. We attempt acquire directly
-    // and gracefully fall back to empty state on failure.
     try {
       const cfg = await commands.loadConfig();
+      config = cfg;
       devices.restoreSelection(cfg.last_video_device_id, cfg.last_audio_device_id);
 
-      if (cfg.last_video_device_id) {
+      // Only attempt auto-acquire once the welcome flow has been
+      // completed — firing getUserMedia before the user has seen the
+      // explanation is jarring (spec §8.1).
+      if (cfg.welcome_dismissed && cfg.last_video_device_id) {
         logger.info('attempting auto-acquire', {
           videoId: cfg.last_video_device_id,
           audioId: cfg.last_audio_device_id,
@@ -81,7 +91,7 @@
         }
       }
     } catch (err) {
-      logger.warn('auto-acquire skipped', { err: String(err) });
+      logger.warn('startup config load failed', { err: String(err) });
     }
   });
 
@@ -97,14 +107,12 @@
     }
   });
 
-  // Derived title bar label for the active device.
   let activeVideoLabel = $derived(
     stream.currentVideoId
       ? (devices.video.find((d) => d.deviceId === stream.currentVideoId)?.label ?? null)
       : null,
   );
 
-  // TitleBar status shows fullscreen hint + mute state when relevant.
   let statusLabel = $derived(ui.muted ? 'muted' : null);
 
   async function toggleFullscreen(): Promise<void> {
@@ -132,7 +140,6 @@
     const uninstall = hotkeys.install();
 
     const unsub = [
-      // Highest priority: close the top modal on Esc.
       hotkeys.register({
         id: 'esc-close-modal',
         priority: 20,
@@ -140,11 +147,11 @@
           if (!hotkeys.isEscape(e) || !ui.modalOpen) return false;
           const top = ui.topModal;
           if (top === 'device-picker') pickerOpen = false;
+          if (top === 'settings') settingsOpen = false;
           ui.popModal();
           return true;
         },
       }),
-      // Next: Esc exits fullscreen.
       hotkeys.register({
         id: 'esc-exit-fullscreen',
         priority: 10,
@@ -154,7 +161,6 @@
           return true;
         },
       }),
-      // Cmd+F / F11 toggle fullscreen.
       hotkeys.register({
         id: 'fullscreen',
         match: (e) => {
@@ -165,7 +171,6 @@
           return false;
         },
       }),
-      // Cmd+M toggles mute.
       hotkeys.register({
         id: 'mute',
         match: (e) => {
@@ -175,7 +180,6 @@
           return true;
         },
       }),
-      // Cmd+, opens settings (event bridge — SettingsModal lands in M6).
       hotkeys.register({
         id: 'preferences',
         match: (e) => {
@@ -193,9 +197,9 @@
   }
 
   function handleSettings() {
-    // SettingsModal lands in Milestone 6. For now we just log so the
-    // keybinding and menu bridge are both observable in the log file.
-    logger.info('settings requested');
+    logger.info('settings opened');
+    settingsOpen = true;
+    ui.pushModal('settings');
   }
 
   function handleChoose() {
@@ -217,38 +221,108 @@
     ui.popModal('device-picker');
   }
 
-  /** Persist the in-use device IDs so the next launch can auto-acquire
-   *  them (spec §17.1 recommendation B). These are resume hints rather
-   *  than user settings — other config fields still require an explicit
-   *  Save action from the SettingsModal (Milestone 6). */
+  function handleSettingsClose() {
+    settingsOpen = false;
+    ui.popModal('settings');
+  }
+
+  async function handleSettingsSave(newCfg: AppConfig, deviceChanged: boolean) {
+    try {
+      await commands.saveConfig(newCfg);
+      config = newCfg;
+      theme.set(newCfg.theme);
+      ui.showToast('Settings saved', 'success');
+      logger.info('settings saved', { deviceChanged });
+
+      if (deviceChanged && newCfg.last_video_device_id) {
+        await stream.acquire(newCfg.last_video_device_id, newCfg.last_audio_device_id);
+        if (stream.status === 'error') {
+          ui.showToast(stream.error?.message ?? 'Failed to switch device', 'error');
+        } else {
+          await devices.refresh();
+        }
+      } else if (deviceChanged && !newCfg.last_video_device_id) {
+        stream.release();
+      }
+
+      settingsOpen = false;
+      ui.popModal('settings');
+    } catch (err) {
+      logger.error('settings save failed', { err: String(err) });
+      ui.showToast('Failed to save settings', 'error');
+    }
+  }
+
   async function rememberDeviceSelection(videoId: string, audioId: string | null) {
     try {
-      const cfg = await commands.loadConfig();
-      await commands.saveConfig({
+      const cfg = config ?? (await commands.loadConfig());
+      const next: AppConfig = {
         ...cfg,
         last_video_device_id: videoId,
         last_audio_device_id: audioId,
-      });
+      };
+      await commands.saveConfig(next);
+      config = next;
       logger.info('saved last-used device', { videoId, audioId });
     } catch (err) {
       logger.warn('failed to save last-used device', { err: String(err) });
     }
+  }
+
+  async function handleWelcomeGrant() {
+    grantRequesting = true;
+    try {
+      const granted = await requestPermission();
+      logger.info('welcome permission probe', { granted });
+      await devices.refresh();
+      await dismissWelcome();
+    } finally {
+      grantRequesting = false;
+    }
+  }
+
+  async function handleWelcomeSkip() {
+    await dismissWelcome();
+  }
+
+  async function dismissWelcome() {
+    if (!config) return;
+    try {
+      const next: AppConfig = { ...config, welcome_dismissed: true };
+      await commands.saveConfig(next);
+      config = next;
+      logger.info('welcome dismissed');
+    } catch (err) {
+      logger.warn('failed to persist welcome_dismissed', { err: String(err) });
+      // Fail-open: show main UI anyway so the user isn't stuck.
+      config = { ...config, welcome_dismissed: true };
+    }
+  }
+
+  function reopenChoose() {
+    handleChoose();
   }
 </script>
 
 <div class="shell">
   <TitleBar deviceLabel={activeVideoLabel} status={statusLabel} />
   <main class="main">
-    {#if stream.status === 'active'}
+    {#if showWelcome}
+      <WelcomeScreen
+        onGrant={handleWelcomeGrant}
+        onSkip={handleWelcomeSkip}
+        requesting={grantRequesting}
+      />
+    {:else if stream.status === 'active'}
       <VideoView />
     {:else if stream.status === 'error' && stream.error}
-      <div class="error-panel">
-        <p class="error-title">
-          {stream.error.kind === 'disconnected' ? 'Device disconnected' : 'Unable to start stream'}
-        </p>
-        <p class="error-body">{stream.error.message}</p>
-        <button type="button" class="error-action" onclick={handleChoose}>Choose device</button>
-      </div>
+      <ErrorOverlay
+        title={stream.error.kind === 'disconnected'
+          ? 'Device disconnected'
+          : 'Unable to start stream'}
+        message={stream.error.message}
+        primary={{ label: 'Choose device', onClick: reopenChoose }}
+      />
     {:else}
       <EmptyState onChoose={handleChoose} />
     {/if}
@@ -257,6 +331,17 @@
 </div>
 
 <DevicePicker open={pickerOpen} onConfirm={handlePickerConfirm} onClose={handlePickerClose} />
+
+{#if config}
+  <SettingsModal
+    open={settingsOpen}
+    {config}
+    onSave={handleSettingsSave}
+    onClose={handleSettingsClose}
+  />
+{/if}
+
+<Toast />
 
 <style>
   .shell {
@@ -273,54 +358,5 @@
     display: flex;
     flex-direction: column;
     background: var(--bv-video-bg);
-  }
-
-  .error-panel {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--bv-space-3);
-    color: var(--bv-text);
-    background: var(--bv-bg);
-    padding: var(--bv-space-12);
-    text-align: center;
-  }
-
-  .error-title {
-    font-family: var(--bv-font-display);
-    font-size: 20px;
-    font-weight: 300;
-    letter-spacing: 0.5px;
-    margin: 0;
-    color: var(--bv-accent);
-  }
-
-  .error-body {
-    color: var(--bv-text-muted);
-    margin: 0;
-    max-width: 420px;
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  .error-action {
-    margin-top: var(--bv-space-2);
-    padding: 10px 20px;
-    border: 1px solid var(--bv-accent);
-    border-radius: 4px;
-    color: var(--bv-accent);
-    font-size: 13px;
-    transition:
-      background var(--bv-dur-fast) var(--bv-ease),
-      color var(--bv-dur-fast) var(--bv-ease);
-  }
-  .error-action:hover {
-    background: var(--bv-accent);
-    color: var(--bv-paper);
-  }
-  :root[data-theme='dark'] .error-action:hover {
-    color: var(--bv-ink-dark);
   }
 </style>

@@ -86,6 +86,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and Cmd+, hit the same handler
 - `TitleBar` gains a `muted` status label so mute state is visible
   without opening devtools
+- **Settings + Welcome (Milestone 6)**: AppConfig gains
+  `welcome_dismissed: bool` so the first-run Welcome flow only
+  shows until the user completes it. `serde(default)` keeps older
+  configs working — covered by a new Rust test
+- `WelcomeScreen.svelte` (first-run explainer with Grant access /
+  Skip); auto-acquire is now gated on `welcome_dismissed` so we
+  never fire `getUserMedia` before the user sees the rationale
+- `SettingsModal.svelte` with Video / Audio / About tabs, local
+  form state + `dirty` flag driving an explicit Save button per
+  spec §8.6. Volume + mute live-apply through `ui` store;
+  `theme` + device IDs persist through Rust `saveConfig`
+- `ErrorOverlay.svelte` replaces the inline error-panel in App
+  with a reusable component that takes title / message / up to
+  two actions
+- `Toast.svelte` + `ui.showToast(msg, kind)` surface non-blocking
+  confirmations (Save succeeded, device switch failed, etc.)
+  bottom-right above the ActionBar
 
 ### Decisions
 

@@ -25,3 +25,58 @@ pub enum OcrError {
     #[error("OCR is not supported on this platform")]
     UnsupportedPlatform,
 }
+
+// ── Translation types (added in M2) ──────────────────────────────────────────
+
+/// Errors returned by the translation inference engine.
+#[derive(Debug, Error)]
+pub enum TranslateError {
+    #[error("translation model is not ready — call ModelStore::download first")]
+    ModelNotReady,
+
+    #[error("inference failed: {0}")]
+    InferenceFailed(String),
+
+    #[error("tokenizer error: {0}")]
+    Tokenizer(String),
+
+    #[error("device initialisation failed: {0}")]
+    DeviceInitFailed(String),
+}
+
+/// Errors returned by the model-download / integrity layer.
+#[derive(Debug, Error)]
+pub enum ModelStoreError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("SHA-256 mismatch for {file}: expected {expected}, got {actual}")]
+    Sha256Mismatch {
+        file: String,
+        expected: String,
+        actual: String,
+    },
+
+    #[error("HTTP download error: {0}")]
+    Http(String),
+
+    #[error("could not determine application data directory")]
+    NoAppDataDir,
+
+    #[error("JSON parse error: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+/// Live status of the offline translation model.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ModelStatus {
+    /// Model files have not been downloaded yet.
+    NotInstalled,
+    /// A download is in progress.
+    Downloading { bytes: u64, total: u64 },
+    /// All model files are present and verified.
+    Ready,
+    /// The last download or verify attempt failed.
+    Failed(String),
+}

@@ -29,11 +29,22 @@ tokio = { version = "1", features = ["full"] }
 directories = "5"
 image = "0.25"
 
-# Apple Vision Framework bindings — only compile on macOS. On Linux CI
-# (lint / typecheck jobs) these would fail with "objc2 only works on Apple
-# platforms"; the source code in `src/translation/ocr.rs` is already gated
-# with `#[cfg(target_os = "macos")]`, so pairing Cargo-level gating keeps
-# cross-platform `cargo check` green for future Windows / Linux ports.
+# Offline translation support — pure-Rust tokenizer, cache, and model
+# downloader. The ONNX Runtime bindings (`ort`) are added in the M2/ort
+# implementation and may live either here or under a target block.
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+lru = "0.12"
+strsim = "0.11"
+sha2 = "0.10"
+reqwest = { version = "0.12", features = ["stream", "rustls-tls"], default-features = false }
+futures-util = "0.3"
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["download-binaries", "ndarray", "tls-native", "std"] }
+ndarray = { version = "0.17", features = ["std"] }
+
+# Apple Vision Framework bindings — only compile on macOS. The source
+# code in `src/translation/ocr.rs` is gated with `#[cfg(target_os = "macos")]`,
+# so pairing Cargo-level gating keeps cross-platform `cargo check` green
+# for future Windows / Linux ports.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-vision = "0.3"

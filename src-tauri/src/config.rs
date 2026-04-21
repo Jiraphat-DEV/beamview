@@ -6,18 +6,13 @@ use serde::{Deserialize, Serialize};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     Light,
     Dark,
+    #[default]
     System,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Theme::System
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

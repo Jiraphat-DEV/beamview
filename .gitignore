@@ -1,3 +1,24 @@
-temp_project_BEAMVIEW/
+# Existing project files
 .DS_Store
 .claude/
+temp_project_BEAMVIEW/
+
+# Node / pnpm
+node_modules/
+pnpm-debug.log*
+
+# Build output
+/dist/
+/build/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Vite cache
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# IDE scratch
+*.log

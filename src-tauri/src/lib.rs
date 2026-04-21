@@ -25,6 +25,8 @@ pub fn run() {
             commands::reset_config,
             commands::get_app_version,
             commands::quit_app,
+            commands::is_fullscreen,
+            commands::toggle_fullscreen,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

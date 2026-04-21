@@ -1,10 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
+  import { onDestroy, onMount } from 'svelte';
   import { commands } from '$lib/ipc';
   import { logger } from '$lib/logger';
-  import { theme } from '$lib/stores/theme.svelte';
+  import * as hotkeys from '$lib/hotkeys/registry';
   import { devices } from '$lib/stores/devices.svelte';
   import { stream } from '$lib/stores/stream.svelte';
+  import { theme } from '$lib/stores/theme.svelte';
+  import { ui } from '$lib/stores/ui.svelte';
   import TitleBar from '$lib/components/TitleBar.svelte';
   import ActionBar from '$lib/components/ActionBar.svelte';
   import EmptyState from '$lib/components/EmptyState.svelte';
@@ -12,9 +15,35 @@
   import DevicePicker from '$lib/components/DevicePicker.svelte';
 
   let pickerOpen = $state(false);
+  let uninstallHotkeys: (() => void) | null = null;
+  let unlistenPreferences: (() => void) | null = null;
 
   onMount(async () => {
-    await theme.init();
+    // Install hotkeys + the menu event bridge FIRST so a later async
+    // failure in theme / devices / auto-acquire can't silently swallow
+    // Cmd+F / Cmd+M / Cmd+, / Preferences… .
+    try {
+      uninstallHotkeys = installHotkeys();
+      logger.info('hotkeys installed');
+    } catch (err) {
+      logger.error('failed to install hotkeys', { err: String(err) });
+    }
+
+    try {
+      unlistenPreferences = await listen('menu://preferences', () => {
+        logger.info('preferences event received (menu)');
+        handleSettings();
+      });
+      logger.info('preferences event listener registered');
+    } catch (err) {
+      logger.error('failed to register preferences listener', { err: String(err) });
+    }
+
+    try {
+      await theme.init();
+    } catch (err) {
+      logger.warn('theme init failed', { err: String(err) });
+    }
 
     try {
       const version = await commands.getAppVersion();
@@ -26,16 +55,10 @@
     await devices.refresh();
 
     // Auto-restore the last-used device per spec §17.1 recommendation B.
-    //
-    // We try getUserMedia with the saved deviceId directly rather than
-    // gating on `enumerateDevices()` membership. WKWebView on macOS may
-    // rotate / withhold deviceIds before camera permission is granted,
-    // so a saved ID can be "missing" from the enum yet still valid for
-    // getUserMedia — or vice versa.
-    //
-    // If the attempt fails (permission revoked, device unplugged, ID
-    // stale after a rebuild), release resets to idle and the user sees
-    // the empty state with its Choose-device CTA.
+    // WKWebView on macOS may rotate / withhold deviceIds before camera
+    // permission is granted, so a saved ID can be "missing" from the
+    // enum yet still valid for getUserMedia. We attempt acquire directly
+    // and gracefully fall back to empty state on failure.
     try {
       const cfg = await commands.loadConfig();
       devices.restoreSelection(cfg.last_video_device_id, cfg.last_audio_device_id);
@@ -54,14 +77,17 @@
           });
           stream.release();
         } else {
-          // Refresh the enum now that permission has been granted —
-          // the labels come with real names we want in the picker.
           await devices.refresh();
         }
       }
     } catch (err) {
       logger.warn('auto-acquire skipped', { err: String(err) });
     }
+  });
+
+  onDestroy(() => {
+    uninstallHotkeys?.();
+    unlistenPreferences?.();
   });
 
   // Keep <html data-theme> in sync with the resolved theme.
@@ -78,23 +104,117 @@
       : null,
   );
 
-  function handleFullscreen() {
-    // Milestone 5 wires this to commands.toggleFullscreen()
-    logger.info('fullscreen requested');
+  // TitleBar status shows fullscreen hint + mute state when relevant.
+  let statusLabel = $derived(ui.muted ? 'muted' : null);
+
+  async function toggleFullscreen(): Promise<void> {
+    try {
+      const next = await commands.toggleFullscreen();
+      logger.info('fullscreen toggled', { fullscreen: next });
+    } catch (err) {
+      logger.warn('toggleFullscreen failed', { err: String(err) });
+    }
   }
+
+  async function exitFullscreenIfActive(): Promise<boolean> {
+    try {
+      const current = await commands.isFullscreen();
+      if (!current) return false;
+      await commands.toggleFullscreen();
+      return true;
+    } catch (err) {
+      logger.warn('exitFullscreen failed', { err: String(err) });
+      return false;
+    }
+  }
+
+  function installHotkeys(): () => void {
+    const uninstall = hotkeys.install();
+
+    const unsub = [
+      // Highest priority: close the top modal on Esc.
+      hotkeys.register({
+        id: 'esc-close-modal',
+        priority: 20,
+        match: (e) => {
+          if (!hotkeys.isEscape(e) || !ui.modalOpen) return false;
+          const top = ui.topModal;
+          if (top === 'device-picker') pickerOpen = false;
+          ui.popModal();
+          return true;
+        },
+      }),
+      // Next: Esc exits fullscreen.
+      hotkeys.register({
+        id: 'esc-exit-fullscreen',
+        priority: 10,
+        match: (e) => {
+          if (!hotkeys.isEscape(e)) return false;
+          void exitFullscreenIfActive();
+          return true;
+        },
+      }),
+      // Cmd+F / F11 toggle fullscreen.
+      hotkeys.register({
+        id: 'fullscreen',
+        match: (e) => {
+          if (hotkeys.isMetaKey(e, 'f') || hotkeys.isF11(e)) {
+            void toggleFullscreen();
+            return true;
+          }
+          return false;
+        },
+      }),
+      // Cmd+M toggles mute.
+      hotkeys.register({
+        id: 'mute',
+        match: (e) => {
+          if (!hotkeys.isMetaKey(e, 'm')) return false;
+          ui.toggleMute();
+          logger.info('mute toggled', { muted: ui.muted });
+          return true;
+        },
+      }),
+      // Cmd+, opens settings (event bridge — SettingsModal lands in M6).
+      hotkeys.register({
+        id: 'preferences',
+        match: (e) => {
+          if (!hotkeys.isMetaKey(e, ',')) return false;
+          handleSettings();
+          return true;
+        },
+      }),
+    ];
+
+    return () => {
+      for (const off of unsub) off();
+      uninstall();
+    };
+  }
+
   function handleSettings() {
-    // Milestone 6 wires this to the SettingsModal
+    // SettingsModal lands in Milestone 6. For now we just log so the
+    // keybinding and menu bridge are both observable in the log file.
     logger.info('settings requested');
   }
+
   function handleChoose() {
     pickerOpen = true;
+    ui.pushModal('device-picker');
   }
+
   async function handlePickerConfirm(videoId: string, audioId: string | null) {
     pickerOpen = false;
+    ui.popModal('device-picker');
     await stream.acquire(videoId, audioId);
     if (stream.status === 'active') {
       await rememberDeviceSelection(videoId, audioId);
     }
+  }
+
+  function handlePickerClose() {
+    pickerOpen = false;
+    ui.popModal('device-picker');
   }
 
   /** Persist the in-use device IDs so the next launch can auto-acquire
@@ -114,13 +234,10 @@
       logger.warn('failed to save last-used device', { err: String(err) });
     }
   }
-  function handlePickerClose() {
-    pickerOpen = false;
-  }
 </script>
 
 <div class="shell">
-  <TitleBar deviceLabel={activeVideoLabel} />
+  <TitleBar deviceLabel={activeVideoLabel} status={statusLabel} />
   <main class="main">
     {#if stream.status === 'active'}
       <VideoView />
@@ -136,7 +253,7 @@
       <EmptyState onChoose={handleChoose} />
     {/if}
   </main>
-  <ActionBar onFullscreen={handleFullscreen} onSettings={handleSettings} />
+  <ActionBar onFullscreen={toggleFullscreen} onSettings={handleSettings} />
 </div>
 
 <DevicePicker open={pickerOpen} onConfirm={handlePickerConfirm} onClose={handlePickerClose} />

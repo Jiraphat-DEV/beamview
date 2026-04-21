@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { commands } from '$lib/ipc';
+  import { logger } from '$lib/logger';
   import { theme } from '$lib/stores/theme.svelte';
   import TitleBar from '$lib/components/TitleBar.svelte';
   import ActionBar from '$lib/components/ActionBar.svelte';
@@ -10,9 +11,9 @@
     await theme.init();
     try {
       const version = await commands.getAppVersion();
-      console.info(`Beamview ${version}`);
+      logger.info(`Beamview ${version} started`);
     } catch (err) {
-      console.warn('[app] failed to fetch app version', err);
+      logger.warn('failed to fetch app version', { err: String(err) });
     }
   });
 
@@ -27,15 +28,15 @@
 
   function handleFullscreen() {
     // Milestone 5 wires this to commands.toggleFullscreen()
-    console.info('[app] fullscreen requested');
+    logger.info('fullscreen requested');
   }
   function handleSettings() {
     // Milestone 6 wires this to the SettingsModal
-    console.info('[app] settings requested');
+    logger.info('settings requested');
   }
   function handleChoose() {
     // Milestone 4 wires this to the DevicePicker
-    console.info('[app] choose device requested');
+    logger.info('choose device requested');
   }
 </script>
 

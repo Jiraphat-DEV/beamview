@@ -26,19 +26,38 @@
     await devices.refresh();
 
     // Auto-restore the last-used device per spec §17.1 recommendation B.
-    // Only auto-acquire when labels are non-empty (= media permission
-    // has been granted in a previous session) — otherwise we'd silently
-    // fire a permission dialog before the user has context.
+    //
+    // We try getUserMedia with the saved deviceId directly rather than
+    // gating on `enumerateDevices()` membership. WKWebView on macOS may
+    // rotate / withhold deviceIds before camera permission is granted,
+    // so a saved ID can be "missing" from the enum yet still valid for
+    // getUserMedia — or vice versa.
+    //
+    // If the attempt fails (permission revoked, device unplugged, ID
+    // stale after a rebuild), release resets to idle and the user sees
+    // the empty state with its Choose-device CTA.
     try {
       const cfg = await commands.loadConfig();
       devices.restoreSelection(cfg.last_video_device_id, cfg.last_audio_device_id);
 
-      const savedVideo = cfg.last_video_device_id
-        ? devices.video.find((d) => d.deviceId === cfg.last_video_device_id)
-        : null;
-      if (savedVideo && savedVideo.label) {
-        logger.info('auto-acquiring last-used device', { videoId: savedVideo.deviceId });
-        await stream.acquire(savedVideo.deviceId, cfg.last_audio_device_id);
+      if (cfg.last_video_device_id) {
+        logger.info('attempting auto-acquire', {
+          videoId: cfg.last_video_device_id,
+          audioId: cfg.last_audio_device_id,
+          enumSize: devices.video.length,
+        });
+        await stream.acquire(cfg.last_video_device_id, cfg.last_audio_device_id);
+        if (stream.status === 'error') {
+          logger.info('auto-acquire failed — falling back to empty state', {
+            kind: stream.error?.kind,
+            message: stream.error?.message,
+          });
+          stream.release();
+        } else {
+          // Refresh the enum now that permission has been granted —
+          // the labels come with real names we want in the picker.
+          await devices.refresh();
+        }
       }
     } catch (err) {
       logger.warn('auto-acquire skipped', { err: String(err) });

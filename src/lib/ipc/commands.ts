@@ -15,4 +15,9 @@ export const commands = {
   getAppVersion: (): Promise<string> => invoke<string>('get_app_version'),
 
   quitApp: (): Promise<void> => invoke<void>('quit_app'),
+
+  isFullscreen: (): Promise<boolean> => invoke<boolean>('is_fullscreen'),
+
+  /** Toggle the main window's fullscreen state. Resolves with the new state. */
+  toggleFullscreen: (): Promise<boolean> => invoke<boolean>('toggle_fullscreen'),
 };

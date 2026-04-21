@@ -27,11 +27,18 @@ thiserror = "1"
 tracing = "0.1"
 tokio = { version = "1", features = ["full"] }
 directories = "5"
+image = "0.25"
+
+# Apple Vision Framework bindings — only compile on macOS. On Linux CI
+# (lint / typecheck jobs) these would fail with "objc2 only works on Apple
+# platforms"; the source code in `src/translation/ocr.rs` is already gated
+# with `#[cfg(target_os = "macos")]`, so pairing Cargo-level gating keeps
+# cross-platform `cargo check` green for future Windows / Linux ports.
+[target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-vision = "0.3"
 objc2-foundation = "0.3"
 objc2-core-graphics = "0.3"
-image = "0.25"
 
 [dev-dependencies]
 tempfile = "3"

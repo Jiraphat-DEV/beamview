@@ -14,6 +14,7 @@
   import ActionBar from '$lib/components/ActionBar.svelte';
   import EmptyState from '$lib/components/EmptyState.svelte';
   import ErrorOverlay from '$lib/components/ErrorOverlay.svelte';
+  import LoadingState from '$lib/components/LoadingState.svelte';
   import VideoView from '$lib/components/VideoView.svelte';
   import DevicePicker from '$lib/components/DevicePicker.svelte';
   import SettingsModal from '$lib/components/SettingsModal.svelte';
@@ -26,6 +27,34 @@
   let config = $state<AppConfig | null>(null);
   let uninstallHotkeys: (() => void) | null = null;
   let unlistenPreferences: (() => void) | null = null;
+
+  // Auto-hide chrome after 2s of inactivity while the stream is playing
+  // and no modal is open (spec §5.4.1). Any mouse move resets the timer
+  // and pops the bars back in.
+  const CHROME_HIDE_MS = 2000;
+  let chromeHidden = $state(false);
+  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearHideTimer() {
+    if (hideTimer !== null) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+  }
+
+  function scheduleHide() {
+    clearHideTimer();
+    hideTimer = setTimeout(() => {
+      chromeHidden = true;
+    }, CHROME_HIDE_MS);
+  }
+
+  function handlePointerActivity() {
+    chromeHidden = false;
+    if (stream.status === 'active' && !ui.modalOpen) {
+      scheduleHide();
+    }
+  }
 
   // Show Welcome until config is loaded AND user has dismissed it.
   const showWelcome = $derived(config !== null && !config.welcome_dismissed);
@@ -98,6 +127,27 @@
   onDestroy(() => {
     uninstallHotkeys?.();
     unlistenPreferences?.();
+    clearHideTimer();
+    window.removeEventListener('mousemove', handlePointerActivity);
+  });
+
+  // Track pointer activity globally so moving the mouse anywhere in the
+  // window reveals the chrome. Attaching after mount so SSR / test
+  // environments without a window don't crash.
+  onMount(() => {
+    window.addEventListener('mousemove', handlePointerActivity, { passive: true });
+  });
+
+  // React to status + modal changes: if we shouldn't auto-hide, clear
+  // the timer and force the chrome visible. If we should, start timing.
+  $effect(() => {
+    const shouldAutoHide = stream.status === 'active' && !ui.modalOpen;
+    if (shouldAutoHide) {
+      scheduleHide();
+    } else {
+      clearHideTimer();
+      chromeHidden = false;
+    }
   });
 
   // Keep <html data-theme> in sync with the resolved theme.
@@ -304,8 +354,10 @@
   }
 </script>
 
-<div class="shell">
-  <TitleBar deviceLabel={activeVideoLabel} status={statusLabel} />
+<div class="shell" class:chrome-hidden={chromeHidden}>
+  <div class="chrome chrome-top">
+    <TitleBar deviceLabel={activeVideoLabel} status={statusLabel} />
+  </div>
   <main class="main">
     {#if showWelcome}
       <WelcomeScreen
@@ -315,6 +367,8 @@
       />
     {:else if stream.status === 'active'}
       <VideoView />
+    {:else if stream.status === 'acquiring'}
+      <LoadingState />
     {:else if stream.status === 'error' && stream.error}
       <ErrorOverlay
         title={stream.error.kind === 'disconnected'
@@ -327,7 +381,9 @@
       <EmptyState onChoose={handleChoose} />
     {/if}
   </main>
-  <ActionBar onFullscreen={toggleFullscreen} onSettings={handleSettings} />
+  <div class="chrome chrome-bottom">
+    <ActionBar onFullscreen={toggleFullscreen} onSettings={handleSettings} />
+  </div>
 </div>
 
 <DevicePicker open={pickerOpen} onConfirm={handlePickerConfirm} onClose={handlePickerClose} />
@@ -358,5 +414,22 @@
     display: flex;
     flex-direction: column;
     background: var(--bv-video-bg);
+  }
+
+  .chrome {
+    transition:
+      opacity var(--bv-dur-med) var(--bv-ease),
+      transform var(--bv-dur-med) var(--bv-ease);
+  }
+
+  .chrome-hidden .chrome-top {
+    opacity: 0;
+    transform: translateY(-100%);
+    pointer-events: none;
+  }
+  .chrome-hidden .chrome-bottom {
+    opacity: 0;
+    transform: translateY(100%);
+    pointer-events: none;
   }
 </style>

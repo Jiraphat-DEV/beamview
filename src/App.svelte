@@ -19,7 +19,31 @@
   let unlistenPreferences: (() => void) | null = null;
 
   onMount(async () => {
-    await theme.init();
+    // Install hotkeys + the menu event bridge FIRST so a later async
+    // failure in theme / devices / auto-acquire can't silently swallow
+    // Cmd+F / Cmd+M / Cmd+, / Preferences… .
+    try {
+      uninstallHotkeys = installHotkeys();
+      logger.info('hotkeys installed');
+    } catch (err) {
+      logger.error('failed to install hotkeys', { err: String(err) });
+    }
+
+    try {
+      unlistenPreferences = await listen('menu://preferences', () => {
+        logger.info('preferences event received (menu)');
+        handleSettings();
+      });
+      logger.info('preferences event listener registered');
+    } catch (err) {
+      logger.error('failed to register preferences listener', { err: String(err) });
+    }
+
+    try {
+      await theme.init();
+    } catch (err) {
+      logger.warn('theme init failed', { err: String(err) });
+    }
 
     try {
       const version = await commands.getAppVersion();
@@ -59,16 +83,6 @@
     } catch (err) {
       logger.warn('auto-acquire skipped', { err: String(err) });
     }
-
-    // Install hotkeys after stores are ready so handlers see real state.
-    uninstallHotkeys = installHotkeys();
-
-    // Bridge the native menu's Preferences… event into the frontend —
-    // the SettingsModal (Milestone 6) will subscribe to the same path.
-    unlistenPreferences = await listen('menu://preferences', () => {
-      logger.info('preferences event received (menu)');
-      handleSettings();
-    });
   });
 
   onDestroy(() => {

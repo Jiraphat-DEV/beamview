@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build + draft GitHub Release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri bundle + attach to draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Beamview ${{ github.ref_name }}'
+          releaseBody: |
+            Beamview ${{ github.ref_name }}.
+
+            See [CHANGELOG.md](https://github.com/Jiraphat-DEV/beamview/blob/main/CHANGELOG.md) for details.
+
+            **This build is unsigned.** macOS Gatekeeper will refuse to launch it on first run. To open:
+            1. Ctrl-click (or right-click) the app in `/Applications`.
+            2. Choose *Open* from the context menu.
+            3. Confirm the Gatekeeper warning once. Subsequent launches work normally.
+
+            Requires a macOS 13+ Apple Silicon machine and a USB capture card that enumerates as a UVC/UAC device.
+          releaseDraft: true
+          prerelease: false

@@ -6,5 +6,5 @@
 
 - [ ] `pnpm lint`
 - [ ] `pnpm typecheck`
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml`
+- [ ] `pnpm test:rust`
 - [ ] `pnpm tauri dev` manual smoke (if UI changed)

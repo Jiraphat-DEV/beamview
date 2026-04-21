@@ -15,6 +15,7 @@
     "tauri": "tauri",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json",
     "typecheck:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "lint": "pnpm run lint:prettier && pnpm run lint:eslint && pnpm run lint:rust",
     "lint:prettier": "prettier --check .",
     "lint:eslint": "eslint .",

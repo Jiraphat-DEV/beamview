@@ -1,47 +1,66 @@
 <script lang="ts">
-  // Root component — minimal placeholder for Milestone 1.
-  // UI shell and real layout land in Milestone 3 (UI Shell).
+  import { onMount } from 'svelte';
+  import { commands } from '$lib/ipc';
+  import { theme } from '$lib/stores/theme.svelte';
+  import TitleBar from '$lib/components/TitleBar.svelte';
+  import ActionBar from '$lib/components/ActionBar.svelte';
+  import EmptyState from '$lib/components/EmptyState.svelte';
+
+  onMount(async () => {
+    await theme.init();
+    try {
+      const version = await commands.getAppVersion();
+      console.info(`Beamview ${version}`);
+    } catch (err) {
+      console.warn('[app] failed to fetch app version', err);
+    }
+  });
+
+  // Apply the resolved theme to <html>. Main.ts sets it synchronously
+  // before mount to avoid FOUC; this effect keeps it in sync after the
+  // store has loaded the saved pref and while the OS theme changes.
+  $effect(() => {
+    if (theme.ready) {
+      document.documentElement.dataset.theme = theme.resolved;
+    }
+  });
+
+  function handleFullscreen() {
+    // Milestone 5 wires this to commands.toggleFullscreen()
+    console.info('[app] fullscreen requested');
+  }
+  function handleSettings() {
+    // Milestone 6 wires this to the SettingsModal
+    console.info('[app] settings requested');
+  }
+  function handleChoose() {
+    // Milestone 4 wires this to the DevicePicker
+    console.info('[app] choose device requested');
+  }
 </script>
 
-<main class="app">
-  <h1 class="brand">beamview</h1>
-  <p class="tagline">Beam your game. See it instantly.</p>
-</main>
+<div class="shell">
+  <TitleBar />
+  <main class="main">
+    <EmptyState onChoose={handleChoose} />
+  </main>
+  <ActionBar onFullscreen={handleFullscreen} onSettings={handleSettings} />
+</div>
 
 <style>
-  .app {
-    min-height: 100vh;
+  .shell {
+    height: 100vh;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    font-family: 'Helvetica Neue', Inter, Arial, sans-serif;
-    background: #faf9f6;
-    color: #1a1a1a;
+    background: var(--bv-bg);
+    color: var(--bv-text);
   }
 
-  .brand {
-    margin: 0;
-    font-weight: 300;
-    font-size: 32px;
-    letter-spacing: 2px;
-  }
-
-  .tagline {
-    margin: 0;
-    font-weight: 400;
-    font-size: 14px;
-    color: #5f5e5a;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    .app {
-      background: #0f0f0e;
-      color: #e8e6de;
-    }
-    .tagline {
-      color: #8a8984;
-    }
+  .main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bv-video-bg);
   }
 </style>

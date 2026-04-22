@@ -26,6 +26,22 @@ pub struct ConfigRegion {
     pub height: u32,
 }
 
+/// Where the translated subtitle renders in the app window.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SubtitlePosition {
+    /// Separate panel below the video — does NOT cover game content.
+    /// New default; best for gameplay where every pixel of the game
+    /// matters.
+    #[default]
+    PanelBelow,
+    /// Absolutely-positioned overlay at the bottom of the video frame
+    /// (original M4 behaviour).  Preserved for users who prefer the
+    /// compact look and are willing to accept a small bottom strip of
+    /// game content being covered.
+    OverlayBottom,
+}
+
 /// Translation feature configuration (added in schema v2).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -39,6 +55,17 @@ pub struct TranslationConfig {
     pub fps: f32,
     /// Show the English caption above the Thai overlay.
     pub show_english_caption: bool,
+    /// Where the subtitle overlay/panel renders.  Added after initial
+    /// M4 testing showed the overlay covered game content users cared
+    /// about; new default is `PanelBelow`.  Missing from older v2
+    /// configs → serde default (`panel_below`).
+    #[serde(default)]
+    pub subtitle_position: SubtitlePosition,
+    /// Which translation model is active.  Default `"nllb-200-distilled-600M"`
+    /// for back-compat with configs written before the model picker existed.
+    /// Field is optional with a default — no schema version bump needed.
+    #[serde(default = "default_active_model_id")]
+    pub active_model_id: String,
 }
 
 impl Default for TranslationConfig {
@@ -47,13 +74,25 @@ impl Default for TranslationConfig {
             enabled: false,
             region: None,
             fps: 1.0,
-            show_english_caption: false,
+            // Default ON — the EN caption anchors the Thai translation to
+            // its source sentence, which matters because translation lag
+            // (~1–2 s) means the English subtitle on-screen has usually
+            // moved on by the time the Thai overlay appears.  Seeing EN +
+            // TH together in the overlay lets the user pair them visually
+            // instead of guessing which English line is being translated.
+            show_english_caption: true,
+            subtitle_position: SubtitlePosition::PanelBelow,
+            active_model_id: default_active_model_id(),
         }
     }
 }
 
 fn default_fps() -> f32 {
     1.0
+}
+
+fn default_active_model_id() -> String {
+    "nllb-200-distilled-600M".to_owned()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -217,6 +256,8 @@ mod tests {
                 }),
                 fps: 2.0,
                 show_english_caption: true,
+                subtitle_position: SubtitlePosition::OverlayBottom,
+                active_model_id: "nllb-200-distilled-600M".into(),
             },
         };
         save(&cfg, &path).unwrap();
@@ -305,6 +346,36 @@ mod tests {
         assert_eq!(cfg, AppConfig::default());
     }
 
+    /// Loading a v2 config without `active_model_id` (written before model
+    /// picker was added) must fill in the default value "nllb-200-distilled-600M".
+    #[test]
+    fn active_model_id_defaults_to_nllb() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version": 2, "translation": {"enabled": false}}"#,
+        )
+        .unwrap();
+        let cfg = load(&path).unwrap();
+        assert_eq!(
+            cfg.translation.active_model_id, "nllb-200-distilled-600M",
+            "active_model_id must default to nllb-200-distilled-600M for back-compat"
+        );
+    }
+
+    /// Round-trip `active_model_id` when set to the fast model.
+    #[test]
+    fn active_model_id_round_trips() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let mut cfg = AppConfig::default();
+        cfg.translation.active_model_id = "m2m100-418M".into();
+        save(&cfg, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.translation.active_model_id, "m2m100-418M");
+    }
+
     #[test]
     fn theme_serde_roundtrip() {
         for t in [Theme::Light, Theme::Dark, Theme::System] {
@@ -360,7 +431,10 @@ mod tests {
             (cfg.translation.fps - 1.0).abs() < f32::EPSILON,
             "fps must default to 1.0"
         );
-        assert!(!cfg.translation.show_english_caption);
+        // New default: EN caption is ON so users can pair EN→TH visually
+        // despite the ~1–2 s translation lag.  Existing v2 configs that
+        // already persisted `false` continue to round-trip as `false`.
+        assert!(cfg.translation.show_english_caption);
 
         // The on-disk file must also now show schema_version 2.
         let on_disk: serde_json::Value =
@@ -393,6 +467,8 @@ mod tests {
                 }),
                 fps: 0.5,
                 show_english_caption: false,
+                subtitle_position: SubtitlePosition::PanelBelow,
+                active_model_id: "m2m100-418M".into(),
             },
         };
         save(&cfg, &path).unwrap();

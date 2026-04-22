@@ -81,14 +81,6 @@
     // and is not torn down when the stream drops and VideoView unmounts.
   });
 
-  // M3: Expose a debug harness on window.__beamviewDebug (DEV only).
-  // This allows end-to-end testing without any visible UI.
-  //
-  // Usage in DevTools:
-  //   window.__beamviewDebug.downloadModel()
-  //   window.__beamviewDebug.setRegion({ x: 0, y: 900, width: 1280, height: 120 })
-  //   window.__beamviewDebug.enableTranslation()
-  //   // watch the console for [translate] lines
   onMount(() => {
     // Sync the store with Rust's live model state — the Svelte singleton
     // resets to `not_installed` on every hot reload, but the Rust engine
@@ -96,47 +88,60 @@
     translation.refreshModelStatus();
 
     if (import.meta.env.DEV) {
-      // @ts-expect-error -- debug harness is intentionally untyped
+      // Minimal store inspector — exposes only the store reference so
+      // DevTools can read reactive state without coupling to internal APIs.
+      // Usage: window.__beamviewDebug.getTranslationStore()
+      // @ts-expect-error -- debug helper is intentionally untyped
       window.__beamviewDebug = {
         getTranslationStore: () => translation,
-        setRegion: (r: { x: number; y: number; width: number; height: number }) =>
-          translation.setRegion(r),
-        enableTranslation: () => {
-          translation.enabled = true;
-        },
-        disableTranslation: () => {
-          translation.enabled = false;
-        },
-        downloadModel: () => translation.downloadModel(),
-        refreshModelStatus: () => translation.refreshModelStatus(),
       };
-      console.info('[beamview] debug harness available at window.__beamviewDebug');
     }
   });
 </script>
 
 <div class="video-shell">
-  <video
-    bind:this={videoEl}
-    autoplay
-    muted
-    playsinline
-    disablepictureinpicture
-    disableremoteplayback
-  ></video>
-  <TranslationOverlay />
+  <div class="video-stage">
+    <video
+      bind:this={videoEl}
+      autoplay
+      muted
+      playsinline
+      disablepictureinpicture
+      disableremoteplayback
+    ></video>
+    {#if translation.subtitlePosition === 'overlay_bottom'}
+      <TranslationOverlay variant="overlay" />
+    {/if}
+  </div>
+  {#if translation.subtitlePosition === 'panel_below' && translation.enabled}
+    <TranslationOverlay variant="panel" />
+  {/if}
 </div>
 
 <style>
+  /* Flex column so the translation panel (when enabled) sits below
+     the video without covering game content — which was the main
+     complaint after first-real-JRPG testing. */
   .video-shell {
     flex: 1;
     min-height: 0;
     background: var(--bv-video-bg);
     display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* The video itself — takes all the leftover space. Centred inside
+     its own relative container so overlay-variant subtitles can be
+     absolutely positioned within. */
+  .video-stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
     position: relative;
+    overflow: hidden;
   }
 
   video {

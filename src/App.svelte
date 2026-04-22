@@ -120,6 +120,12 @@
         translation.enabled = cfg.translation.enabled;
         translation.fps = cfg.translation.fps ?? 1.0;
         translation.showEnglishCaption = cfg.translation.show_english_caption;
+        // `subtitle_position` was added after M5 initial testing; older
+        // v2 configs that predate it will have `undefined` here, in which
+        // case keep the store's default (`panel_below`).
+        if (cfg.translation.subtitle_position) {
+          translation.subtitlePosition = cfg.translation.subtitle_position;
+        }
         if (cfg.translation.region) {
           translation.setRegion(cfg.translation.region);
         }
@@ -354,6 +360,9 @@
       if (newCfg.translation) {
         translation.fps = newCfg.translation.fps ?? 1.0;
         translation.showEnglishCaption = newCfg.translation.show_english_caption;
+        if (newCfg.translation.subtitle_position) {
+          translation.subtitlePosition = newCfg.translation.subtitle_position;
+        }
         if (newCfg.translation.region) translation.setRegion(newCfg.translation.region);
       }
       ui.showToast('Settings saved', 'success');

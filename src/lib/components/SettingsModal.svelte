@@ -4,6 +4,7 @@
   import { commands } from '$lib/ipc';
   import type { AppConfig, Theme, TranslationConfig } from '$lib/ipc';
   import { DEFAULT_TRANSLATION_CONFIG } from '$lib/ipc';
+  import type { ModelInfo } from '$lib/ipc/commands';
   import { displayLabel } from '$lib/capture/devices';
   import { devices } from '$lib/stores/devices.svelte';
   import { ui } from '$lib/stores/ui.svelte';
@@ -46,6 +47,10 @@
   let version = $state<string>('');
   let showDownloadModal = $state(false);
   let showRegionSelector = $state(false);
+  /** Model ID being downloaded (for the model picker download button state). */
+  let downloadingModelId = $state<string | null>(null);
+  /** Model ID to download, passed into ModelDownloadModal. */
+  let downloadModalModelId = $state<string | null>(null);
 
   let dialogEl = $state<HTMLDialogElement | null>(null);
 
@@ -67,7 +72,10 @@
       formVideoId = config.last_video_device_id;
       formAudioId = config.last_audio_device_id;
       formTheme = config.theme;
-      formTranslation = { ...(config.translation ?? DEFAULT_TRANSLATION_CONFIG) };
+      // Spread defaults first so fields added in later schema bumps
+      // (e.g. `subtitle_position` after M5 user feedback) fall back to
+      // their default when the existing on-disk config predates them.
+      formTranslation = { ...DEFAULT_TRANSLATION_CONFIG, ...(config.translation ?? {}) };
       activeTab = 'video';
       el.showModal();
     }
@@ -83,6 +91,10 @@
       formTranslation.fps !== (config.translation?.fps ?? 1.0) ||
       formTranslation.show_english_caption !==
         (config.translation?.show_english_caption ?? false) ||
+      formTranslation.subtitle_position !==
+        (config.translation?.subtitle_position ?? 'panel_below') ||
+      formTranslation.active_model_id !==
+        (config.translation?.active_model_id ?? 'nllb-200-distilled-600M') ||
       JSON.stringify(formTranslation.region) !== JSON.stringify(config.translation?.region ?? null),
   );
 
@@ -91,6 +103,21 @@
   async function handleSave() {
     saving = true;
     try {
+      // Hot-swap the translator FIRST — if it fails (model files missing /
+      // translator load error / arch mismatch) we do not want to persist
+      // a config that the backend will refuse on next launch.
+      const prevModelId = config.translation?.active_model_id ?? 'nllb-200-distilled-600M';
+      if (formTranslation.active_model_id !== prevModelId) {
+        try {
+          await translation.setActiveModel(formTranslation.active_model_id);
+        } catch (err) {
+          // Surface the backend error so the user knows why save failed
+          // instead of clicking Save and getting nothing.
+          ui.showToast(`สลับโมเดลล้มเหลว: ${String(err)}`, 'error');
+          return; // abort save; leave settings open so user can retry
+        }
+      }
+
       const newCfg: AppConfig = {
         ...config,
         last_video_device_id: formVideoId,
@@ -103,10 +130,16 @@
       translation.enabled = formTranslation.enabled;
       translation.fps = formTranslation.fps;
       translation.showEnglishCaption = formTranslation.show_english_caption;
+      translation.subtitlePosition = formTranslation.subtitle_position;
       if (formTranslation.region) {
         translation.setRegion(formTranslation.region);
       }
-      await onSave(newCfg, deviceChanged);
+
+      try {
+        await onSave(newCfg, deviceChanged);
+      } catch (err) {
+        ui.showToast(`บันทึกล้มเหลว: ${String(err)}`, 'error');
+      }
     } finally {
       saving = false;
     }
@@ -120,16 +153,18 @@
     if (open) handleCancel();
   }
 
-  function openDownloadModal() {
-    showDownloadModal = true;
-    ui.pushModal('model-download');
-  }
-
   function openRegionSelector() {
     if (!videoEl) return;
     showRegionSelector = true;
     ui.pushModal('region-selector');
   }
+
+  // Refresh the model catalogue when the translation tab becomes active.
+  $effect(() => {
+    if (open && activeTab === 'translation') {
+      translation.refreshModelList();
+    }
+  });
 
   // Close the region selector when it pops itself from the modal stack.
   // It calls ui.popModal('region-selector'); we detect when the modal
@@ -148,6 +183,8 @@
   $effect(() => {
     if (showDownloadModal && !ui.modalStack.includes('model-download')) {
       showDownloadModal = false;
+      downloadingModelId = null;
+      downloadModalModelId = null;
     }
   });
 
@@ -157,15 +194,43 @@
     return `x:${r.x} y:${r.y}  ${r.width}×${r.height}`;
   }
 
-  function modelStatusLabel(): string {
-    const s = translation.modelStatus;
-    if (s.type === 'ready') return 'ติดตั้งแล้ว';
-    if (s.type === 'downloading') {
-      const pct = s.total > 0 ? Math.round((s.bytes / s.total) * 100) : 0;
-      return `กำลังดาวน์โหลด… ${pct}%`;
+  function formatBytes(b: number): string {
+    if (b >= 1_000_000_000) return `${(b / 1_000_000_000).toFixed(1)} GB`;
+    if (b >= 1_000_000) return `${Math.round(b / 1_000_000)} MB`;
+    return `${Math.round(b / 1_000)} KB`;
+  }
+
+  function modelBadge(m: ModelInfo): string {
+    if (m.is_active) return 'กำลังใช้';
+    if (m.installed) return 'ติดตั้งแล้ว';
+    return 'ยังไม่ติดตั้ง';
+  }
+
+  function modelBadgeClass(m: ModelInfo): string {
+    if (m.is_active) return 'badge active';
+    if (m.installed) return 'badge installed';
+    return 'badge not-installed';
+  }
+
+  async function handleDownloadModel(m: ModelInfo) {
+    downloadModalModelId = m.id;
+    downloadingModelId = m.id;
+    showDownloadModal = true;
+    ui.pushModal('model-download');
+  }
+
+  async function handleUseModel(m: ModelInfo) {
+    // Optimistically update the form — the actual hot-swap happens on Save.
+    formTranslation = { ...formTranslation, active_model_id: m.id };
+  }
+
+  async function handleDeleteModel(m: ModelInfo) {
+    try {
+      await translation.deleteModel(m.id);
+      ui.showToast(`ลบโมเดล ${m.display_name} แล้ว`, 'success');
+    } catch (err) {
+      ui.showToast(`ลบล้มเหลว: ${String(err)}`, 'error');
     }
-    if (s.type === 'failed') return `ล้มเหลว: ${s.message}`;
-    return 'ยังไม่ติดตั้ง (~650 MB)';
   }
 </script>
 
@@ -329,22 +394,119 @@
         <span>แสดง EN caption เหนือ TH</span>
       </label>
 
-      <!-- Model status row -->
-      <div class="field tr-model-row">
-        <span class="label">โมเดลแปลภาษา (NLLB-200)</span>
-        <div class="tr-model-status-row">
-          <span class="model-status-text">{modelStatusLabel()}</span>
-          {#if translation.modelStatus.type !== 'ready'}
-            <button type="button" class="btn-sm" onclick={openDownloadModal}>
-              {translation.modelStatus.type === 'failed' ? 'ติดตั้งใหม่' : 'ดาวน์โหลด'}
-            </button>
-          {/if}
+      <!-- Subtitle position -->
+      <div class="field">
+        <span class="label">ตำแหน่งคำแปล</span>
+        <div class="tr-position-group" role="radiogroup" aria-label="ตำแหน่งคำแปล">
+          <label class="radio">
+            <input
+              type="radio"
+              name="subtitle-position"
+              value="panel_below"
+              checked={formTranslation.subtitle_position === 'panel_below'}
+              onchange={() =>
+                (formTranslation = { ...formTranslation, subtitle_position: 'panel_below' })}
+            />
+            <span class="radio-label">
+              <strong>แยก panel ใต้วิดีโอ</strong>
+              <span class="hint">ไม่ทับเนื้อหาเกม (แนะนำ)</span>
+            </span>
+          </label>
+          <label class="radio">
+            <input
+              type="radio"
+              name="subtitle-position"
+              value="overlay_bottom"
+              checked={formTranslation.subtitle_position === 'overlay_bottom'}
+              onchange={() =>
+                (formTranslation = { ...formTranslation, subtitle_position: 'overlay_bottom' })}
+            />
+            <span class="radio-label">
+              <strong>ทับวิดีโอด้านล่าง</strong>
+              <span class="hint">กะทัดรัด แต่บังเนื้อหาเกมบางส่วน</span>
+            </span>
+          </label>
         </div>
       </div>
 
+      <!-- Model picker -->
+      <div class="field">
+        <span class="label">โมเดลแปลภาษา</span>
+        {#if translation.modelList.length === 0}
+          <p class="hint">กำลังโหลดรายการโมเดล…</p>
+        {:else}
+          <div class="model-card-list">
+            {#each translation.modelList as m (m.id)}
+              <div class="model-card" class:selected={formTranslation.active_model_id === m.id}>
+                <div class="model-card-top">
+                  <div class="model-card-info">
+                    <span class="model-name">{m.display_name}</span>
+                    <span class={modelBadgeClass(m)}>{modelBadge(m)}</span>
+                  </div>
+                  <span class="model-size">~{formatBytes(m.size_bytes)}</span>
+                </div>
+                <p class="model-desc">{m.description}</p>
+                <div class="model-card-actions">
+                  {#if !m.installed}
+                    <button
+                      type="button"
+                      class="btn-sm"
+                      onclick={() => handleDownloadModel(m)}
+                      disabled={downloadingModelId === m.id}
+                    >
+                      {downloadingModelId === m.id ? 'กำลังดาวน์โหลด…' : 'ดาวน์โหลด'}
+                    </button>
+                  {:else if formTranslation.active_model_id === m.id}
+                    <!-- Selected in form (will be active after Save).
+                         Delete disabled because we cannot remove the model
+                         we are about to switch into. -->
+                    {#if !m.is_active}
+                      <span class="hint">จะเปิดใช้งานเมื่อกด Save</span>
+                    {/if}
+                    <button
+                      type="button"
+                      class="btn-sm danger"
+                      disabled
+                      title="ไม่สามารถลบโมเดลที่เลือกใช้งานได้"
+                    >
+                      ลบ
+                    </button>
+                  {:else}
+                    <!-- Installed but not selected in form: user can switch
+                         to it OR delete it.  Backend deletion of the
+                         currently-Rust-active model only succeeds after a
+                         Save flips the active model first; the toast
+                         from handleDeleteModel surfaces any backend
+                         refusal. -->
+                    <button
+                      type="button"
+                      class="btn-sm accent"
+                      onclick={() => handleUseModel(m)}
+                      disabled={translation.switchingModel}
+                    >
+                      ใช้โมเดลนี้
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-sm danger"
+                      onclick={() => handleDeleteModel(m)}
+                      disabled={translation.switchingModel || m.is_active}
+                      title={m.is_active
+                        ? 'โมเดลนี้กำลังใช้งานอยู่ — บันทึกการเปลี่ยนโมเดลก่อนแล้วค่อยลบ'
+                        : ''}
+                    >
+                      ลบ
+                    </button>
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
       <p class="hint tr-about">
-        ใช้โมเดล NLLB-200-distilled-600M จาก Meta AI — ทำงานแบบออฟไลน์สมบูรณ์
-        ดาวน์โหลดเพียงครั้งเดียว (~650 MB) ไม่มีการส่งข้อมูลออกสู่อินเทอร์เน็ต
+        โมเดลทำงานแบบออฟไลน์สมบูรณ์ ดาวน์โหลดเพียงครั้งเดียว ไม่มีการส่งข้อมูลสู่อินเทอร์เน็ต
       </p>
     {:else}
       <section class="about">
@@ -385,7 +547,14 @@
 </dialog>
 
 {#if showDownloadModal}
-  <ModelDownloadModal />
+  <ModelDownloadModal
+    modelId={downloadModalModelId}
+    onDone={() => {
+      downloadingModelId = null;
+      downloadModalModelId = null;
+      translation.refreshModelList();
+    }}
+  />
 {/if}
 
 {#if showRegionSelector && videoEl}
@@ -508,6 +677,48 @@
     font-size: 13px;
     color: var(--bv-text);
     margin-bottom: var(--bv-space-2);
+  }
+
+  .tr-position-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--bv-space-2);
+  }
+
+  .radio {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--bv-space-3);
+    font-size: 13px;
+    color: var(--bv-text);
+    padding: var(--bv-space-2) var(--bv-space-3);
+    border: 1px solid var(--bv-divider, rgba(26, 26, 26, 0.1));
+    border-radius: 4px;
+    cursor: pointer;
+    transition: border-color 0.12s ease;
+  }
+
+  .radio:has(input:checked) {
+    border-color: var(--bv-text);
+  }
+
+  .radio input[type='radio'] {
+    margin-top: 2px;
+  }
+
+  .radio-label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .radio-label strong {
+    font-weight: 500;
+  }
+
+  .radio-label .hint {
+    font-size: 11px;
+    color: var(--bv-text-subtle);
   }
 
   .hint {
@@ -653,5 +864,114 @@
   .tr-about {
     margin-top: var(--bv-space-4);
     line-height: 1.6;
+  }
+
+  /* ── Model picker cards ──────────────────────────────────────────────────── */
+
+  .model-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--bv-space-2);
+    margin-top: var(--bv-space-1);
+  }
+
+  .model-card {
+    border: 1px solid var(--bv-divider, rgba(26, 26, 26, 0.12));
+    border-radius: 6px;
+    padding: var(--bv-space-3) var(--bv-space-4);
+    background: var(--bv-bg);
+    transition: border-color 0.12s ease;
+  }
+
+  .model-card.selected {
+    border-color: var(--bv-accent);
+  }
+
+  .model-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--bv-space-2);
+    margin-bottom: 4px;
+  }
+
+  .model-card-info {
+    display: flex;
+    align-items: center;
+    gap: var(--bv-space-2);
+  }
+
+  .model-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--bv-text);
+  }
+
+  .model-size {
+    font-size: 11px;
+    color: var(--bv-text-subtle);
+    white-space: nowrap;
+  }
+
+  .model-desc {
+    font-size: 11px;
+    color: var(--bv-text-subtle);
+    margin: 0 0 var(--bv-space-2);
+    line-height: 1.5;
+  }
+
+  .model-card-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--bv-space-2);
+    flex-wrap: wrap;
+  }
+
+  /* Status badges */
+  .badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+  }
+
+  .badge.active {
+    background: color-mix(in srgb, var(--bv-accent) 15%, transparent);
+    color: var(--bv-accent);
+  }
+
+  .badge.installed {
+    background: color-mix(in srgb, var(--bv-text) 10%, transparent);
+    color: var(--bv-text-muted);
+  }
+
+  .badge.not-installed {
+    background: transparent;
+    color: var(--bv-text-subtle);
+    border: 1px solid var(--bv-divider, rgba(26, 26, 26, 0.12));
+  }
+
+  /* Accent and danger btn-sm variants */
+  .btn-sm.accent {
+    background: var(--bv-accent);
+    border-color: var(--bv-accent);
+    color: var(--bv-paper);
+  }
+  .btn-sm.accent:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--bv-accent) 88%, black);
+  }
+  :root[data-theme='dark'] .btn-sm.accent {
+    color: var(--bv-ink-dark);
+  }
+
+  .btn-sm.danger {
+    color: #c94f30;
+    border-color: rgba(201, 79, 48, 0.35);
+  }
+  .btn-sm.danger:hover:not(:disabled) {
+    background: rgba(201, 79, 48, 0.08);
   }
 </style>

@@ -15,6 +15,9 @@ export interface ConfigRegion {
   height: number;
 }
 
+/** Mirrors `SubtitlePosition` in src-tauri/src/config.rs. */
+export type SubtitlePosition = 'panel_below' | 'overlay_bottom';
+
 /**
  * Translation feature configuration (added in schema v2).
  * Mirrors `TranslationConfig` in src-tauri/src/config.rs.
@@ -25,13 +28,25 @@ export interface TranslationConfig {
   /** 0.5 | 1.0 | 2.0 fps. Default 1.0. */
   fps: number;
   show_english_caption: boolean;
+  /** Where the subtitle renders. Default `panel_below` (non-blocking). */
+  subtitle_position: SubtitlePosition;
+  /** Which model is active. Default "nllb-200-distilled-600M". */
+  active_model_id: string;
 }
 
 export const DEFAULT_TRANSLATION_CONFIG: TranslationConfig = {
   enabled: false,
   region: null,
   fps: 1.0,
-  show_english_caption: false,
+  // Default ON — helps the user pair EN→TH visually despite the ~1–2 s
+  // translation lag (by the time TH appears, the on-video EN has
+  // usually changed).
+  show_english_caption: true,
+  // Default `panel_below` so the translation sits beneath the video
+  // without covering game content.  Users who prefer the compact
+  // overlay-on-video layout can switch in Settings → การแปล.
+  subtitle_position: 'panel_below',
+  active_model_id: 'nllb-200-distilled-600M',
 };
 
 export interface AppConfig {

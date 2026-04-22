@@ -177,7 +177,7 @@ impl TranslationEngine {
                 #[cfg(not(target_os = "macos"))]
                 {
                     let _ = (rgba, w, h, region);
-                    Err(crate::translation::types::OcrError::UnsupportedPlatform)
+                    Err::<String, _>(crate::translation::types::OcrError::UnsupportedPlatform)
                 }
             })
             .await

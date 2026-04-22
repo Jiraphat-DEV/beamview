@@ -72,7 +72,12 @@ class TranslationStore {
     logger.info('[translation] region set', { region: r });
   }
 
-  /** Fetch the current model status from Rust and update `modelStatus`. */
+  /** Fetch the current model status from Rust and update `modelStatus`.
+   *
+   * Call this at app startup so the store reflects the live backend state
+   * after a hot reload — otherwise the store defaults to `not_installed`
+   * even when the Rust engine already holds a loaded translator.
+   */
   async refreshModelStatus(): Promise<void> {
     try {
       this.modelStatus = await getTranslationModelStatus();

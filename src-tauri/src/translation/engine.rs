@@ -72,6 +72,11 @@ impl TranslationEngine {
         app: &AppHandle<R>,
     ) -> Result<(), EngineError> {
         if self.translator.is_some() {
+            // Model is already loaded in this process — but the frontend
+            // store may be stale (e.g. after a hot reload or ⌘R, which
+            // resets the Svelte singleton while the Rust engine survives).
+            // Emit the Ready status so any current listeners can sync.
+            let _ = app.emit("model-download-progress", &ModelStatus::Ready);
             return Ok(());
         }
 

@@ -81,6 +81,11 @@
   //   window.__beamviewDebug.enableTranslation()
   //   // watch the console for [translate] lines
   onMount(() => {
+    // Sync the store with Rust's live model state — the Svelte singleton
+    // resets to `not_installed` on every hot reload, but the Rust engine
+    // survives and may already hold a loaded translator.
+    translation.refreshModelStatus();
+
     if (import.meta.env.DEV) {
       // @ts-expect-error -- debug harness is intentionally untyped
       window.__beamviewDebug = {

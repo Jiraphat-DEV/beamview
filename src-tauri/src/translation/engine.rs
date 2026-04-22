@@ -3,8 +3,8 @@
 //! # Usage
 //!
 //! ```ignore
-//! let engine = TranslationEngine::new()?;
-//! engine.ensure_ready(&app_handle).await?;
+//! let (engine, status_handle) = TranslationEngine::new()?;
+//! engine.ensure_ready(&app_handle, &status_handle).await?;
 //! let result = engine.ocr_translate(jpeg_bytes, region).await?;
 //! ```
 //!
@@ -17,7 +17,17 @@
 //! The heavy `ocr_translate` path (JPEG decode + Apple Vision + NLLB inference)
 //! is dispatched to the Tokio blocking-thread pool via `spawn_blocking` to
 //! avoid stalling the async executor.
+//!
+//! # Non-blocking status reads (carry-over B)
+//!
+//! A separate `Arc<std::sync::RwLock<ModelStatus>>` (exposed as
+//! `ModelStatusHandle`) is managed in parallel with the engine mutex.  The
+//! engine writes to it as it progresses through `ensure_ready`; the
+//! `get_translation_model_status` command reads from it **without** acquiring
+//! the engine mutex, which would otherwise block for up to 5 minutes during a
+//! large download.
 
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use tauri::{AppHandle, Emitter, Runtime};
@@ -28,6 +38,15 @@ use crate::translation::{
     translator::Translator,
     types::{EngineError, ModelStatus, OcrTranslateResult, Region},
 };
+
+// ── ModelStatusHandle ─────────────────────────────────────────────────────────
+
+/// A cheaply-cloneable handle to the current `ModelStatus`.
+///
+/// Reads are lock-free from the perspective of the engine mutex because this
+/// `RwLock` is stored *outside* the `Mutex<TranslationEngine>`.  The engine
+/// writes to it; the `get_translation_model_status` command reads from it.
+pub type ModelStatusHandle = Arc<RwLock<ModelStatus>>;
 
 // ── TranslationEngine ─────────────────────────────────────────────────────────
 
@@ -45,16 +64,26 @@ impl TranslationEngine {
     /// Construct a new engine.  Checks whether the model is already installed
     /// on disk but does NOT load it into memory yet — call `ensure_ready` for
     /// that.
-    pub fn new() -> Result<Self, EngineError> {
+    ///
+    /// Returns the engine and a shared `ModelStatusHandle` that can be passed
+    /// to Tauri state independently so `get_translation_model_status` can read
+    /// the status without acquiring the engine mutex.
+    pub fn new() -> Result<(Self, ModelStatusHandle), EngineError> {
         let model_store = ModelStore::new()?;
-        Ok(Self {
+        let initial_status = model_store.model_status();
+        let status_handle: ModelStatusHandle = Arc::new(RwLock::new(initial_status));
+        let engine = Self {
             model_store,
             translator: None,
             cache: TranslationCache::new(),
-        })
+        };
+        Ok((engine, status_handle))
     }
 
     /// Return the current model status without performing any I/O.
+    ///
+    /// Prefer reading from the `ModelStatusHandle` at the Tauri state layer
+    /// for non-blocking reads; this method is kept for internal use and tests.
     pub fn model_status(&self) -> ModelStatus {
         if self.translator.is_some() {
             return ModelStatus::Ready;
@@ -66,16 +95,19 @@ impl TranslationEngine {
     ///
     /// Safe to call repeatedly — returns immediately when the translator is
     /// already initialised.  Emits `model-download-progress` events to the
-    /// frontend while downloading.
+    /// frontend while downloading.  Keeps `status_handle` updated so
+    /// concurrent `get_translation_model_status` reads see live progress.
     pub async fn ensure_ready<R: Runtime>(
         &mut self,
         app: &AppHandle<R>,
+        status_handle: &ModelStatusHandle,
     ) -> Result<(), EngineError> {
         if self.translator.is_some() {
             // Model is already loaded in this process — but the frontend
             // store may be stale (e.g. after a hot reload or ⌘R, which
             // resets the Svelte singleton while the Rust engine survives).
             // Emit the Ready status so any current listeners can sync.
+            *status_handle.write().unwrap() = ModelStatus::Ready;
             let _ = app.emit("model-download-progress", &ModelStatus::Ready);
             return Ok(());
         }
@@ -83,8 +115,12 @@ impl TranslationEngine {
         // Download if not already on disk.
         if !matches!(self.model_store.model_status(), ModelStatus::Ready) {
             let app_clone = app.clone();
+            let sh = status_handle.clone();
             self.model_store
                 .download(move |status| {
+                    // Update the non-blocking handle so concurrent status
+                    // queries return live progress without needing the engine lock.
+                    *sh.write().unwrap() = status.clone();
                     // Best-effort emit — ignore send errors (window may not exist yet).
                     let _ = app_clone.emit("model-download-progress", &status);
                 })
@@ -100,7 +136,8 @@ impl TranslationEngine {
 
         self.translator = Some(translator);
 
-        // Notify the frontend that the model is ready.
+        // Update the non-blocking handle and notify the frontend.
+        *status_handle.write().unwrap() = ModelStatus::Ready;
         let _ = app.emit("model-download-progress", &ModelStatus::Ready);
         Ok(())
     }
@@ -350,7 +387,7 @@ mod tests {
     /// is not loaded and the model files are not present on disk.
     #[test]
     fn model_status_not_installed_when_no_translator() {
-        let engine = TranslationEngine::new().expect("TranslationEngine::new");
+        let (engine, _status_handle) = TranslationEngine::new().expect("TranslationEngine::new");
         assert!(engine.translator.is_none());
         // model_status delegates to model_store when translator is None;
         // in CI (no model files present) it should return NotInstalled or Ready
@@ -362,7 +399,7 @@ mod tests {
         assert!(
             matches!(
                 status,
-                ModelStatus::NotInstalled | ModelStatus::Ready | ModelStatus::Failed(_)
+                ModelStatus::NotInstalled | ModelStatus::Ready | ModelStatus::Failed { .. }
             ),
             "unexpected model_status: {status:?}"
         );

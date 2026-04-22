@@ -10,6 +10,7 @@
   import { stream } from '$lib/stores/stream.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { ui } from '$lib/stores/ui.svelte';
+  import { translation } from '$lib/stores/translation.svelte';
   import TitleBar from '$lib/components/TitleBar.svelte';
   import ActionBar from '$lib/components/ActionBar.svelte';
   import EmptyState from '$lib/components/EmptyState.svelte';
@@ -18,15 +19,20 @@
   import VideoView from '$lib/components/VideoView.svelte';
   import DevicePicker from '$lib/components/DevicePicker.svelte';
   import SettingsModal from '$lib/components/SettingsModal.svelte';
+  import ModelDownloadModal from '$lib/components/ModelDownloadModal.svelte';
   import Toast from '$lib/components/Toast.svelte';
   import WelcomeScreen from '$lib/components/WelcomeScreen.svelte';
 
   let pickerOpen = $state(false);
   let settingsOpen = $state(false);
+  let showModelDownload = $state(false);
   let grantRequesting = $state(false);
   let config = $state<AppConfig | null>(null);
+  /** The <video> element from VideoView — used by RegionSelector. */
+  let videoEl = $state<HTMLVideoElement | null>(null);
   let uninstallHotkeys: (() => void) | null = null;
   let unlistenPreferences: (() => void) | null = null;
+  let unlistenTranslationToggle: (() => void) | null = null;
 
   // Auto-hide chrome after 2s of inactivity while the stream is playing
   // and no modal is open (spec §5.4.1). Any mouse move resets the timer
@@ -80,6 +86,16 @@
     }
 
     try {
+      unlistenTranslationToggle = await listen('menu://translation-toggle', () => {
+        logger.info('translation-toggle event received (menu)');
+        handleTranslationToggle();
+      });
+      logger.info('translation-toggle event listener registered');
+    } catch (err) {
+      logger.error('failed to register translation-toggle listener', { err: String(err) });
+    }
+
+    try {
       await theme.init();
     } catch (err) {
       logger.warn('theme init failed', { err: String(err) });
@@ -98,6 +114,16 @@
       const cfg = await commands.loadConfig();
       config = cfg;
       devices.restoreSelection(cfg.last_video_device_id, cfg.last_audio_device_id);
+
+      // Hydrate translation store from persisted config (M4).
+      if (cfg.translation) {
+        translation.enabled = cfg.translation.enabled;
+        translation.fps = cfg.translation.fps ?? 1.0;
+        translation.showEnglishCaption = cfg.translation.show_english_caption;
+        if (cfg.translation.region) {
+          translation.setRegion(cfg.translation.region);
+        }
+      }
 
       // Only attempt auto-acquire once the welcome flow has been
       // completed — firing getUserMedia before the user has seen the
@@ -127,8 +153,12 @@
   onDestroy(() => {
     uninstallHotkeys?.();
     unlistenPreferences?.();
+    unlistenTranslationToggle?.();
     clearHideTimer();
     window.removeEventListener('mousemove', handlePointerActivity);
+    // Carry-over C: tear down the progress event listener here (app lifetime)
+    // rather than in VideoView.svelte (stream lifetime).
+    translation.destroy();
   });
 
   // Track pointer activity globally so moving the mouse anywhere in the
@@ -147,6 +177,14 @@
     } else {
       clearHideTimer();
       chromeHidden = false;
+    }
+  });
+
+  // Sync showModelDownload with the modal stack — the ModelDownloadModal
+  // pops itself via ui.popModal('model-download') when it auto-closes.
+  $effect(() => {
+    if (showModelDownload && !ui.modalStack.includes('model-download')) {
+      showModelDownload = false;
     }
   });
 
@@ -198,6 +236,8 @@
           const top = ui.topModal;
           if (top === 'device-picker') pickerOpen = false;
           if (top === 'settings') settingsOpen = false;
+          if (top === 'model-download') showModelDownload = false;
+          // 'region-selector' pops itself via ui.popModal — no extra flag needed here
           ui.popModal();
           return true;
         },
@@ -238,12 +278,39 @@
           return true;
         },
       }),
+      hotkeys.register({
+        id: 'translation-toggle',
+        priority: 15,
+        match: (e) => {
+          if (!hotkeys.isMetaKey(e, 't')) return false;
+          handleTranslationToggle();
+          return true;
+        },
+      }),
     ];
 
     return () => {
       for (const off of unsub) off();
       uninstall();
     };
+  }
+
+  /**
+   * Toggle translation on/off via Cmd+T or the Translation menu item.
+   *
+   * If the model is not ready → open the ModelDownloadModal instead of
+   * toggling, since translation cannot run without the model.
+   */
+  function handleTranslationToggle() {
+    if (translation.modelStatus.type !== 'ready') {
+      showModelDownload = true;
+      ui.pushModal('model-download');
+      logger.info('translation toggle — model not ready, opening download modal');
+      return;
+    }
+    translation.toggle();
+    ui.showToast(translation.enabled ? 'การแปลเปิดอยู่' : 'การแปลปิดแล้ว', 'info');
+    logger.info('translation toggled', { enabled: translation.enabled });
   }
 
   function handleSettings() {
@@ -281,6 +348,14 @@
       await commands.saveConfig(newCfg);
       config = newCfg;
       theme.set(newCfg.theme);
+      // The SettingsModal already syncs the store before calling onSave,
+      // but we re-apply here as a safety net in case config was loaded from
+      // a persistent source with different values.
+      if (newCfg.translation) {
+        translation.fps = newCfg.translation.fps ?? 1.0;
+        translation.showEnglishCaption = newCfg.translation.show_english_caption;
+        if (newCfg.translation.region) translation.setRegion(newCfg.translation.region);
+      }
       ui.showToast('Settings saved', 'success');
       logger.info('settings saved', { deviceChanged });
 
@@ -366,7 +441,7 @@
         requesting={grantRequesting}
       />
     {:else if stream.status === 'active'}
-      <VideoView />
+      <VideoView bind:videoEl />
     {:else if stream.status === 'acquiring'}
       <LoadingState />
     {:else if stream.status === 'error' && stream.error}
@@ -394,7 +469,12 @@
     {config}
     onSave={handleSettingsSave}
     onClose={handleSettingsClose}
+    {videoEl}
   />
+{/if}
+
+{#if showModelDownload}
+  <ModelDownloadModal />
 {/if}
 
 <Toast />

@@ -5,6 +5,7 @@ pub mod ocr;
 pub mod translator;
 pub mod types;
 
+pub use engine::ModelStatusHandle;
 pub use types::{
     EngineError, ModelStatus, ModelStoreError, OcrError, OcrTranslateResult, Region, TranslateError,
 };

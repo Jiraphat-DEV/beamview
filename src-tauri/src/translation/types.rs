@@ -10,6 +10,43 @@ pub struct Region {
     pub height: u32,
 }
 
+/// Result returned by `TranslationEngine::ocr_translate`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrTranslateResult {
+    /// Recognised English text.
+    pub en: String,
+    /// Translated Thai text.
+    pub th: String,
+    /// Wall-clock milliseconds from entry to return.
+    pub latency_ms: u64,
+    /// True when the Thai string was served from the LRU cache.
+    pub cache_hit: bool,
+    /// True when OCR re-translation was skipped via jaro-winkler dedup.
+    pub duplicate: bool,
+}
+
+/// Top-level errors produced by `TranslationEngine`.
+#[derive(Debug, Error)]
+pub enum EngineError {
+    #[error("translation model is not ready — call download_translation_model first")]
+    ModelNotReady,
+
+    #[error("failed to initialise model store: {0}")]
+    ModelStore(#[from] ModelStoreError),
+
+    #[error("OCR failed: {0}")]
+    Ocr(#[from] OcrError),
+
+    #[error("translation failed: {0}")]
+    Translate(#[from] TranslateError),
+
+    #[error("JPEG decode failed: {0}")]
+    ImageDecode(String),
+
+    #[error("blocking task panicked: {0}")]
+    BlockingPanic(String),
+}
+
 /// Errors that can be returned by the OCR module.
 #[derive(Debug, Error)]
 pub enum OcrError {

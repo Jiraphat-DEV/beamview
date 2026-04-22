@@ -71,6 +71,13 @@ class TranslationStore {
   /** True while a set-active-model operation is in flight. */
   switchingModel = $state(false);
 
+  /** Per-model download status, keyed by model ID.  Populated by the
+   *  `model-download-progress` event listener.  The ModelDownloadModal
+   *  watches `downloadProgress[modelId]` so it can correlate Ready events
+   *  with the specific model being downloaded (not the currently-active
+   *  model whose status is tracked separately in `modelStatus`). */
+  downloadProgress: Record<string, ModelStatus> = $state({});
+
   // ── Private ───────────────────────────────────────────────────────────────
 
   /** True when a tick call is still in flight — used to drop overlapping ticks. */
@@ -259,9 +266,39 @@ class TranslationStore {
   private async _initProgressListener(): Promise<void> {
     if (this.#progressListenerRegistered) return;
 
+    // The Rust side emits two payload shapes on `model-download-progress`:
+    //  - `ModelStatus` (flat): used by `ensure_ready` for the ACTIVE model.
+    //  - `{ model_id, status }` (nested): used by `download_model` for any
+    //    non-active model (the new multi-model picker flow).
+    // Parse both, always update `downloadProgress[id]` keyed by model_id,
+    // and update `modelStatus` too when the event pertains to the currently
+    // active model.
+    type NestedPayload = { model_id: string; status: ModelStatus };
+    type Payload = ModelStatus | NestedPayload;
+
     try {
-      const unlisten = await listen<ModelStatus>('model-download-progress', (event) => {
-        this.modelStatus = event.payload;
+      const unlisten = await listen<Payload>('model-download-progress', (event) => {
+        const p = event.payload;
+        if (p && typeof p === 'object' && 'model_id' in p && 'status' in p) {
+          const nested = p as NestedPayload;
+          this.downloadProgress = { ...this.downloadProgress, [nested.model_id]: nested.status };
+          // Also reflect into the singleton `modelStatus` when this event
+          // targets the active model (active_model_id was passed from
+          // config at startup and lives in Rust; here we track it via the
+          // `is_active` flag on `modelList`).
+          const active = this.modelList.find((m) => m.is_active);
+          if (active && nested.model_id === active.id) {
+            this.modelStatus = nested.status;
+          }
+        } else {
+          // Flat ModelStatus — assume it targets the active model.
+          const flat = p as ModelStatus;
+          this.modelStatus = flat;
+          const active = this.modelList.find((m) => m.is_active);
+          if (active) {
+            this.downloadProgress = { ...this.downloadProgress, [active.id]: flat };
+          }
+        }
       });
       this.#unlistenProgress = unlisten;
       this.#progressListenerRegistered = true;

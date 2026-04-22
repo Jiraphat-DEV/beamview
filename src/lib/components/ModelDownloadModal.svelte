@@ -28,6 +28,20 @@
   const MODAL_ID = 'model-download';
 
   let downloading = $state(false);
+  // Only react to Ready once the user has actually kicked off the
+  // download.  Without this flag the modal would auto-close on mount
+  // whenever the active model was already loaded (its `modelStatus` is
+  // already 'ready'), so the user would see the success toast without
+  // ever triggering a real download.
+  let started = $state(false);
+
+  // Status of the specific model this modal is downloading.  We
+  // prefer the per-model `downloadProgress[modelId]` map so Ready
+  // events for OTHER models (e.g. the already-loaded active one)
+  // don't trigger our auto-close.
+  const status = $derived(
+    modelId ? translation.downloadProgress[modelId] : translation.modelStatus,
+  );
 
   function formatBytes(b: number): string {
     if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
@@ -36,6 +50,7 @@
   }
 
   async function handleDownload() {
+    started = true;
     downloading = true;
     try {
       await translation.downloadModel(modelId ?? undefined);
@@ -49,9 +64,12 @@
     ui.popModal(MODAL_ID);
   }
 
-  // React to status transitions.
+  // React to status transitions — but only after the user has clicked
+  // Download (`started`), so a stale Ready status from a previously
+  // loaded model doesn't auto-close the modal before anything
+  // happens.
   $effect(() => {
-    if (translation.modelStatus.type === 'ready') {
+    if (started && status?.type === 'ready') {
       ui.showToast('โมเดลพร้อมใช้งาน', 'success');
       onDone?.();
       ui.popModal(MODAL_ID);
@@ -59,14 +77,14 @@
   });
 
   const progressPercent = $derived(() => {
-    const s = translation.modelStatus;
-    if (s.type !== 'downloading') return 0;
+    const s = status;
+    if (s?.type !== 'downloading') return 0;
     return s.total > 0 ? Math.round((s.bytes / s.total) * 100) : 0;
   });
 
   const progressLabel = $derived(() => {
-    const s = translation.modelStatus;
-    if (s.type !== 'downloading') return '';
+    const s = status;
+    if (s?.type !== 'downloading') return '';
     return `${formatBytes(s.bytes)} / ${formatBytes(s.total)}`;
   });
 </script>
@@ -81,12 +99,12 @@
     </header>
 
     <div class="body">
-      {#if translation.modelStatus.type === 'not_installed' || (translation.modelStatus.type !== 'downloading' && translation.modelStatus.type !== 'failed' && translation.modelStatus.type !== 'ready')}
+      {#if status?.type === 'not_installed' || (status?.type !== 'downloading' && status?.type !== 'failed' && status?.type !== 'ready')}
         <p class="description">
           ฟีเจอร์แปลภาษาต้องใช้โมเดลซึ่งมีขนาดหลายร้อย MB ดาวน์โหลดเพียงครั้งเดียว
           และทำงานแบบออฟไลน์หลังจากนั้น ไม่มีการส่งข้อมูลออกสู่อินเทอร์เน็ต
         </p>
-      {:else if translation.modelStatus.type === 'downloading'}
+      {:else if status?.type === 'downloading'}
         <p class="description">กำลังดาวน์โหลดโมเดล กรุณารอสักครู่…</p>
         <div class="progress-wrap">
           <div class="progress-bar">
@@ -97,9 +115,9 @@
             <span class="bv-mono">{progressPercent()}%</span>
           </div>
         </div>
-      {:else if translation.modelStatus.type === 'failed'}
+      {:else if status?.type === 'failed'}
         <p class="description error-text">
-          ดาวน์โหลดล้มเหลว: {translation.modelStatus.message}
+          ดาวน์โหลดล้มเหลว: {status.message}
         </p>
         <p class="hint">กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองอีกครั้ง</p>
       {/if}
@@ -108,11 +126,11 @@
     <footer class="footer">
       <button type="button" class="btn ghost" onclick={handleCancel}> ยกเลิก </button>
       <div class="spacer"></div>
-      {#if translation.modelStatus.type === 'failed'}
+      {#if status?.type === 'failed'}
         <button type="button" class="btn accent" onclick={handleDownload} disabled={downloading}>
           ลองอีกครั้ง
         </button>
-      {:else if translation.modelStatus.type !== 'downloading'}
+      {:else if status?.type !== 'downloading'}
         <button type="button" class="btn accent" onclick={handleDownload} disabled={downloading}>
           {downloading ? 'กำลังเตรียม…' : 'ดาวน์โหลดโมเดล'}
         </button>

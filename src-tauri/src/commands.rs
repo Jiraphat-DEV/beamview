@@ -1,8 +1,16 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tauri::{AppHandle, Manager, Runtime};
+use tokio::sync::Mutex;
 
 use crate::config::{self, AppConfig};
+use crate::translation::{
+    engine::TranslationEngine, EngineError, ModelStatus, OcrTranslateResult, Region,
+};
+
+/// Shared state type for the translation engine.
+pub type TranslationEngineState = Arc<Mutex<TranslationEngine>>;
 
 const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -64,4 +72,53 @@ pub fn toggle_fullscreen<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> 
     window.set_fullscreen(next).map_err(|e| e.to_string())?;
     log::info!("fullscreen toggled: {current} -> {next}");
     Ok(next)
+}
+
+// ── Translation commands (M3) ─────────────────────────────────────────────────
+
+/// OCR a captured JPEG frame and translate the recognised English text to Thai.
+///
+/// `jpeg_bytes` — raw JPEG bytes (Tauri serialises `Vec<u8>` as a JSON array
+/// of numbers, which matches `Array.from(Uint8Array)` on the frontend).
+///
+/// Returns `None` when the frame contains no text or is a near-duplicate of
+/// the previous frame (the frontend should keep the last translation visible).
+#[tauri::command]
+pub async fn ocr_translate(
+    state: tauri::State<'_, TranslationEngineState>,
+    jpeg_bytes: Vec<u8>,
+    region: Option<Region>,
+) -> Result<Option<OcrTranslateResult>, String> {
+    let mut engine = state.lock().await;
+    engine
+        .ocr_translate(jpeg_bytes, region)
+        .await
+        .map_err(|e: EngineError| e.to_string())
+}
+
+/// Return the current model status without downloading anything.
+#[tauri::command]
+pub async fn get_translation_model_status(
+    state: tauri::State<'_, TranslationEngineState>,
+) -> Result<ModelStatus, String> {
+    let engine = state.lock().await;
+    Ok(engine.model_status())
+}
+
+/// Download the NLLB-200 model files (first-run, ~900 MB) and load the
+/// translator into memory.
+///
+/// Emits `model-download-progress` events with `ModelStatus::Downloading`
+/// payloads while the download is in progress.  The final event payload is
+/// `ModelStatus::Ready` on success.
+#[tauri::command]
+pub async fn download_translation_model(
+    app: AppHandle,
+    state: tauri::State<'_, TranslationEngineState>,
+) -> Result<(), String> {
+    let mut engine = state.lock().await;
+    engine
+        .ensure_ready(&app)
+        .await
+        .map_err(|e: EngineError| e.to_string())
 }

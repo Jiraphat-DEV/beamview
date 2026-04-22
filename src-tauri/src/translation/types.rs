@@ -45,6 +45,12 @@ pub enum EngineError {
 
     #[error("blocking task panicked: {0}")]
     BlockingPanic(String),
+
+    #[error("unknown model id: {0}")]
+    UnknownModel(String),
+
+    #[error("cannot delete the currently active model while it is loaded")]
+    CannotDeleteActiveModel,
 }
 
 /// Errors that can be returned by the OCR module.
@@ -102,6 +108,12 @@ pub enum ModelStoreError {
 
     #[error("JSON parse error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("unknown model id: {0}")]
+    UnknownModel(String),
+
+    #[error("cannot delete the currently active model")]
+    CannotDeleteActiveModel,
 }
 
 /// Live status of the offline translation model.

@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::config::{self, AppConfig};
 use crate::translation::{
-    engine::{ModelStatusHandle, TranslationEngine},
+    engine::{ModelInfo, ModelStatusHandle, TranslationEngine},
     EngineError, ModelStatus, OcrTranslateResult, Region,
 };
 
@@ -75,15 +75,9 @@ pub fn toggle_fullscreen<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> 
     Ok(next)
 }
 
-// ── Translation commands (M3) ─────────────────────────────────────────────────
+// ── Translation commands ──────────────────────────────────────────────────────
 
 /// OCR a captured JPEG frame and translate the recognised English text to Thai.
-///
-/// `jpeg_bytes` — raw JPEG bytes (Tauri serialises `Vec<u8>` as a JSON array
-/// of numbers, which matches `Array.from(Uint8Array)` on the frontend).
-///
-/// Returns `None` when the frame contains no text or is a near-duplicate of
-/// the previous frame (the frontend should keep the last translation visible).
 #[tauri::command]
 pub async fn ocr_translate(
     state: tauri::State<'_, TranslationEngineState>,
@@ -99,9 +93,7 @@ pub async fn ocr_translate(
 
 /// Return the current model status without downloading anything.
 ///
-/// Reads from the `ModelStatusHandle` (an `Arc<RwLock<ModelStatus>>`) that is
-/// stored as separate Tauri state.  This never acquires the engine mutex, so
-/// it cannot block for 5 minutes during a large download (carry-over B).
+/// Reads from the `ModelStatusHandle` — never acquires the engine mutex.
 #[tauri::command]
 pub fn get_translation_model_status(
     status: tauri::State<'_, ModelStatusHandle>,
@@ -109,21 +101,80 @@ pub fn get_translation_model_status(
     Ok(status.read().unwrap().clone())
 }
 
-/// Download the NLLB-200 model files (first-run, ~900 MB) and load the
-/// translator into memory.
+/// Return metadata for all models in the catalogue (Part C).
 ///
-/// Emits `model-download-progress` events with `ModelStatus::Downloading`
-/// payloads while the download is in progress.  The final event payload is
-/// `ModelStatus::Ready` on success.
+/// Each entry carries `installed`, `is_active`, and `installed_size_bytes` so
+/// the UI can render the full model picker without additional calls.
+#[tauri::command]
+pub async fn list_translation_models(
+    state: tauri::State<'_, TranslationEngineState>,
+) -> Result<Vec<ModelInfo>, String> {
+    let engine = state.lock().await;
+    Ok(engine.list_models())
+}
+
+/// Download a specific model by ID.
+///
+/// Emits `model-download-progress` events with payload
+/// `{ model_id: string, status: ModelStatus }`.
+///
+/// If `model_id` is the active model and no translator is loaded, auto-loads
+/// the translator after download completes.
 #[tauri::command]
 pub async fn download_translation_model(
     app: AppHandle,
     state: tauri::State<'_, TranslationEngineState>,
     status: tauri::State<'_, ModelStatusHandle>,
+    model_id: Option<String>,
+) -> Result<(), String> {
+    let mut engine = state.lock().await;
+
+    // Legacy callers (frontend pre-model-picker) pass no model_id — default
+    // to the active model so the old behaviour is preserved.
+    match model_id.as_deref() {
+        None | Some("") => engine
+            .ensure_ready(&app, &status.inner().clone())
+            .await
+            .map_err(|e: EngineError| e.to_string()),
+        Some(id) => engine
+            .download_model(&app, &status.inner().clone(), id)
+            .await
+            .map_err(|e: EngineError| e.to_string()),
+    }
+}
+
+/// Delete a model's files from disk.
+///
+/// Returns an error string when the model is currently active and loaded.
+/// The frontend should refuse to call this for the active model and show a
+/// tooltip instead, but the backend enforces the constraint regardless.
+#[tauri::command]
+pub async fn delete_translation_model(
+    state: tauri::State<'_, TranslationEngineState>,
+    model_id: String,
 ) -> Result<(), String> {
     let mut engine = state.lock().await;
     engine
-        .ensure_ready(&app, &status.inner().clone())
+        .delete_model(&model_id)
+        .await
+        .map_err(|e: EngineError| e.to_string())
+}
+
+/// Switch the active translation model to `model_id`.
+///
+/// Unloads the current translator and loads the new one from disk.
+/// Returns an error string if the model is not installed.
+///
+/// The frontend should persist `active_model_id` to config after a successful
+/// call so it survives app restart.
+#[tauri::command]
+pub async fn set_active_translation_model(
+    state: tauri::State<'_, TranslationEngineState>,
+    model_id: String,
+) -> Result<(), String> {
+    let mut engine = state.lock().await;
+    engine
+        .set_active_model(&model_id)
         .await
         .map_err(|e: EngineError| e.to_string())
 }

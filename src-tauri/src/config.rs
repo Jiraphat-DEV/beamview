@@ -61,6 +61,11 @@ pub struct TranslationConfig {
     /// configs → serde default (`panel_below`).
     #[serde(default)]
     pub subtitle_position: SubtitlePosition,
+    /// Which translation model is active.  Default `"nllb-200-distilled-600M"`
+    /// for back-compat with configs written before the model picker existed.
+    /// Field is optional with a default — no schema version bump needed.
+    #[serde(default = "default_active_model_id")]
+    pub active_model_id: String,
 }
 
 impl Default for TranslationConfig {
@@ -77,12 +82,17 @@ impl Default for TranslationConfig {
             // instead of guessing which English line is being translated.
             show_english_caption: true,
             subtitle_position: SubtitlePosition::PanelBelow,
+            active_model_id: default_active_model_id(),
         }
     }
 }
 
 fn default_fps() -> f32 {
     1.0
+}
+
+fn default_active_model_id() -> String {
+    "nllb-200-distilled-600M".to_owned()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -247,6 +257,7 @@ mod tests {
                 fps: 2.0,
                 show_english_caption: true,
                 subtitle_position: SubtitlePosition::OverlayBottom,
+                active_model_id: "nllb-200-distilled-600M".into(),
             },
         };
         save(&cfg, &path).unwrap();
@@ -333,6 +344,36 @@ mod tests {
         let path = dir.path().join("never.json");
         let cfg = reset(&path).unwrap();
         assert_eq!(cfg, AppConfig::default());
+    }
+
+    /// Loading a v2 config without `active_model_id` (written before model
+    /// picker was added) must fill in the default value "nllb-200-distilled-600M".
+    #[test]
+    fn active_model_id_defaults_to_nllb() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version": 2, "translation": {"enabled": false}}"#,
+        )
+        .unwrap();
+        let cfg = load(&path).unwrap();
+        assert_eq!(
+            cfg.translation.active_model_id, "nllb-200-distilled-600M",
+            "active_model_id must default to nllb-200-distilled-600M for back-compat"
+        );
+    }
+
+    /// Round-trip `active_model_id` when set to the fast model.
+    #[test]
+    fn active_model_id_round_trips() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let mut cfg = AppConfig::default();
+        cfg.translation.active_model_id = "m2m100-418M".into();
+        save(&cfg, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.translation.active_model_id, "m2m100-418M");
     }
 
     #[test]
@@ -427,6 +468,7 @@ mod tests {
                 fps: 0.5,
                 show_english_caption: false,
                 subtitle_position: SubtitlePosition::PanelBelow,
+                active_model_id: "m2m100-418M".into(),
             },
         };
         save(&cfg, &path).unwrap();

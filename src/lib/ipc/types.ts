@@ -30,6 +30,8 @@ export interface TranslationConfig {
   show_english_caption: boolean;
   /** Where the subtitle renders. Default `panel_below` (non-blocking). */
   subtitle_position: SubtitlePosition;
+  /** Which model is active. Default "nllb-200-distilled-600M". */
+  active_model_id: string;
 }
 
 export const DEFAULT_TRANSLATION_CONFIG: TranslationConfig = {
@@ -44,6 +46,7 @@ export const DEFAULT_TRANSLATION_CONFIG: TranslationConfig = {
   // without covering game content.  Users who prefer the compact
   // overlay-on-video layout can switch in Settings → การแปล.
   subtitle_position: 'panel_below',
+  active_model_id: 'nllb-200-distilled-600M',
 };
 
 export interface AppConfig {

@@ -79,9 +79,50 @@ export const getTranslationModelStatus = (): Promise<ModelStatus> =>
 /**
  * Start a first-run model download (~900 MB).
  *
- * While downloading, the Rust side emits `model-download-progress` events
- * with `ModelStatus` payloads.  Listen via `@tauri-apps/api/event` `listen`.
- * The final event payload is `{ type: 'ready' }` on success.
+ * Pass an optional `modelId` to download a specific catalogue entry.
+ * When omitted, downloads the currently active model (legacy behaviour).
+ *
+ * While downloading, the Rust side emits `model-download-progress` events.
+ * The payload is `{ model_id: string, status: ModelStatus }` when a model_id
+ * is provided, or a bare `ModelStatus` for the legacy path.
  */
-export const downloadTranslationModel = (): Promise<void> =>
-  invoke<void>('download_translation_model');
+export const downloadTranslationModel = (modelId?: string): Promise<void> =>
+  invoke<void>('download_translation_model', { modelId: modelId ?? null });
+
+// ── Model picker commands (M5.5) ──────────────────────────────────────────────
+
+/** Per-model catalogue entry returned by `listTranslationModels`. */
+export type ModelInfo = {
+  id: string;
+  display_name: string;
+  description: string;
+  /** Estimated download size in bytes. */
+  size_bytes: number;
+  /** True when model files are present and verified on disk. */
+  installed: boolean;
+  /** True when this is the currently active (loaded) model. */
+  is_active: boolean;
+  /** Actual on-disk size in bytes (null when not installed). */
+  installed_size_bytes: number | null;
+};
+
+/** Return metadata for all models in the catalogue. */
+export const listTranslationModels = (): Promise<ModelInfo[]> =>
+  invoke<ModelInfo[]>('list_translation_models');
+
+/**
+ * Delete a model's files from disk.
+ *
+ * Rejects with an error string when the model is currently active and loaded.
+ */
+export const deleteTranslationModel = (modelId: string): Promise<void> =>
+  invoke<void>('delete_translation_model', { modelId });
+
+/**
+ * Switch the active translation model.
+ *
+ * Unloads the current translator and loads the new one from disk.
+ * Rejects with an error string if the model is not installed.
+ */
+export const setActiveTranslationModel = (modelId: string): Promise<void> =>
+  invoke<void>('set_active_translation_model', { modelId });

@@ -3,18 +3,27 @@
   import { translation } from '$lib/stores/translation.svelte';
   import { ui } from '$lib/stores/ui.svelte';
 
-  // ModelDownloadModal — M4
+  // ModelDownloadModal — updated M5.5
   //
-  // Shown when the user tries to enable translation while the offline
-  // NLLB-200 model is not yet installed.  Uses the translation store's
-  // `modelStatus` reactively — no custom event listener.
+  // Accepts an optional `modelId` prop.  When provided, it downloads that
+  // specific catalogue model.  When omitted (legacy call from the old flow)
+  // it downloads the active model.
   //
   // Lifecycle:
-  //  - "ดาวน์โหลดโมเดล" → calls translation.downloadModel()
+  //  - "ดาวน์โหลดโมเดล" → calls translation.downloadModel(modelId)
   //  - While Downloading  → progress bar + bytes/total + %
   //  - On Ready           → auto-close + toast "โมเดลพร้อมใช้งาน"
   //  - On Failed          → error + "ลองอีกครั้ง" retry button
   //  - Cancel             → popModal (download continues in background)
+
+  interface Props {
+    /** Specific model to download. If null/undefined, downloads the active model. */
+    modelId?: string | null;
+    /** Called after a successful download (or on dismiss). */
+    onDone?: () => void;
+  }
+
+  let { modelId = null, onDone }: Props = $props();
 
   const MODAL_ID = 'model-download';
 
@@ -29,13 +38,14 @@
   async function handleDownload() {
     downloading = true;
     try {
-      await translation.downloadModel();
+      await translation.downloadModel(modelId ?? undefined);
     } finally {
       downloading = false;
     }
   }
 
   function handleCancel() {
+    onDone?.();
     ui.popModal(MODAL_ID);
   }
 
@@ -43,6 +53,7 @@
   $effect(() => {
     if (translation.modelStatus.type === 'ready') {
       ui.showToast('โมเดลพร้อมใช้งาน', 'success');
+      onDone?.();
       ui.popModal(MODAL_ID);
     }
   });
@@ -72,7 +83,7 @@
     <div class="body">
       {#if translation.modelStatus.type === 'not_installed' || (translation.modelStatus.type !== 'downloading' && translation.modelStatus.type !== 'failed' && translation.modelStatus.type !== 'ready')}
         <p class="description">
-          ฟีเจอร์แปลภาษาต้องใช้โมเดล NLLB-200 ซึ่งมีขนาด <strong>~650 MB</strong> ดาวน์โหลดเพียงครั้งเดียว
+          ฟีเจอร์แปลภาษาต้องใช้โมเดลซึ่งมีขนาดหลายร้อย MB ดาวน์โหลดเพียงครั้งเดียว
           และทำงานแบบออฟไลน์หลังจากนั้น ไม่มีการส่งข้อมูลออกสู่อินเทอร์เน็ต
         </p>
       {:else if translation.modelStatus.type === 'downloading'}
@@ -171,10 +182,6 @@
     line-height: 1.55;
     color: var(--bv-text);
     margin: 0 0 var(--bv-space-4);
-  }
-
-  .description strong {
-    font-weight: 500;
   }
 
   .error-text {

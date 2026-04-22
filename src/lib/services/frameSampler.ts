@@ -153,10 +153,13 @@ export class FrameSampler {
       return;
     }
 
-    // Fire IPC call.
+    // Fire IPC call. The JPEG is already cropped to the region above, so
+    // pass `null` here — otherwise Rust's OCR layer would try to crop the
+    // already-cropped image using the original full-frame coordinates and
+    // fail with "region is out of bounds for <cropped-size> image".
     this.ipcInFlight = true;
     try {
-      const result = await ocrTranslate(jpegBytes, region);
+      const result = await ocrTranslate(jpegBytes, null);
 
       // If the sampler was stopped while the call was in flight, ignore.
       if (!this.running) return;

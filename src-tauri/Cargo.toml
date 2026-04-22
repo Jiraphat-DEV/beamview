@@ -1,6 +1,6 @@
 [package]
 name = "beamview"
-version = "0.1.0"
+version = "0.2.0"
 description = "Low-latency capture card viewer for desktop gamers"
 authors = ["Jiraphat"]
 edition = "2021"

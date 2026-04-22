@@ -1,25 +1,29 @@
 <script lang="ts">
   // TranslationOverlay — M4 + M5 polish
   //
-  // Renders the translated Thai subtitle and (by default) the English source
-  // as an absolutely-positioned overlay inside the VideoView shell.  The EN
-  // caption is kept visually prominent because translation latency (~1–2 s)
-  // means the English subtitle on-screen has usually already changed by the
-  // time the Thai appears — pairing EN↔TH inside the overlay itself is the
-  // only reliable way for the user to know which source line is being
-  // translated.
+  // Renders the translated Thai subtitle (and by default the English source)
+  // in one of two layouts controlled by the `variant` prop:
+  //  - `overlay`  absolutely positioned at the bottom of the video frame
+  //               (original M4 behaviour; covers a small strip of game
+  //               content).  VideoView mounts this variant inside the
+  //               .video-stage element.
+  //  - `panel`    a normal-flow block that lives BELOW the video in
+  //               VideoView's flex column — never covers game content.
+  //               New default per user feedback.
   //
-  // States:
-  //  - enabled && th (no loading)                → normal: EN + TH both
-  //                                                 crisp.
-  //  - enabled && th && loading                  → stale: TH is dimmed and
-  //                                                 a ⟳ hint is appended,
-  //                                                 signalling a fresh TH
-  //                                                 is on the way.
-  //  - enabled && !th && loading (first tick)    → no TH yet: 3-dot spinner
-  //                                                 in place of TH.
+  // The EN caption is kept visually prominent because translation latency
+  // (~1–2 s) means the English subtitle on-screen has usually already
+  // changed by the time the Thai appears — pairing EN↔TH inside the
+  // overlay itself is the only reliable way for the user to know which
+  // source line is being translated.
 
   import { translation } from '$lib/stores/translation.svelte';
+
+  interface Props {
+    variant?: 'overlay' | 'panel';
+  }
+
+  const { variant = 'overlay' }: Props = $props();
 
   // Visible when translation is enabled AND there is Thai text (or loading).
   const visible = $derived(translation.enabled && (translation.th !== null || translation.loading));
@@ -29,9 +33,41 @@
   const stale = $derived(translation.loading && translation.th !== null);
 </script>
 
-{#if visible}
+{#if variant === 'panel'}
+  <!-- Panel variant is ALWAYS in the DOM when mounted so the video area
+       does not resize every time translation toggles on/off — but the
+       inner content is only rendered when there's actually something to
+       show. -->
+  <div class="panel-wrap" class:empty={!visible}>
+    {#if visible}
+      <div class="subtitle-content panel">
+        {#if translation.showEnglishCaption && translation.en}
+          <p class="en-text">{translation.en}</p>
+        {/if}
+
+        <p class="th-text" class:stale>
+          {#if translation.loading && !translation.th}
+            <span class="loading-dots" aria-label="กำลังแปล">
+              <span></span><span></span><span></span>
+            </span>
+          {:else}
+            <span class="th-phrase">{translation.th ?? ''}</span>
+            {#if translation.loading}
+              <span class="stale-hint" aria-label="กำลังแปลประโยคใหม่">⟳</span>
+            {/if}
+          {/if}
+        </p>
+      </div>
+    {:else}
+      <p class="panel-placeholder">ยังไม่มีคำแปล — ปรับพื้นที่ subtitle หรือรออีกครู่</p>
+    {/if}
+  </div>
+{:else if visible}
   <div class="overlay-wrap">
-    <div class="subtitle-box" class:has-en={translation.showEnglishCaption && translation.en}>
+    <div
+      class="subtitle-content overlay"
+      class:has-en={translation.showEnglishCaption && translation.en}
+    >
       {#if translation.showEnglishCaption && translation.en}
         <p class="en-text">{translation.en}</p>
       {/if}
@@ -53,6 +89,7 @@
 {/if}
 
 <style>
+  /* ── Overlay variant — absolutely positioned over the video ───────── */
   .overlay-wrap {
     position: absolute;
     inset: 0;
@@ -63,7 +100,7 @@
     padding-bottom: 8%;
   }
 
-  .subtitle-box {
+  .subtitle-content.overlay {
     max-width: 78%;
     background: rgba(250, 249, 246, 0.92);
     border-radius: 6px;
@@ -75,8 +112,59 @@
     animation: fade-in 0.15s ease;
   }
 
-  .subtitle-box.has-en {
+  .subtitle-content.overlay.has-en {
     gap: 8px;
+  }
+
+  /* ── Panel variant — sits below the video, non-blocking ───────────── */
+  .panel-wrap {
+    flex: 0 0 auto;
+    background: var(--bv-surface, #faf9f6);
+    color: var(--bv-text, #1a1a1a);
+    border-top: 1px solid var(--bv-divider, rgba(26, 26, 26, 0.12));
+    padding: 12px 24px;
+    min-height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .subtitle-content.panel {
+    width: 100%;
+    max-width: 960px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    animation: fade-in 0.15s ease;
+  }
+
+  .panel-placeholder {
+    margin: 0;
+    color: rgba(26, 26, 26, 0.45);
+    font-size: 13px;
+    font-style: italic;
+  }
+
+  /* Dark-theme-friendly panel tones */
+  :global([data-theme='dark']) .panel-wrap {
+    background: var(--bv-surface, #181817);
+    color: var(--bv-text, #e8e6de);
+    border-top-color: rgba(232, 230, 222, 0.14);
+  }
+
+  :global([data-theme='dark']) .en-text {
+    color: rgba(232, 230, 222, 0.85);
+    border-bottom-color: rgba(232, 230, 222, 0.18);
+  }
+
+  :global([data-theme='dark']) .th-text {
+    color: #e8e6de;
+    text-shadow: none;
+  }
+
+  :global([data-theme='dark']) .panel-placeholder {
+    color: rgba(232, 230, 222, 0.45);
   }
 
   @keyframes fade-in {
@@ -87,6 +175,8 @@
       opacity: 1;
     }
   }
+
+  /* ── Shared text styles ───────────────────────────────────────────── */
 
   /* EN caption — promoted from 13 px / 0.65 to 16 px / 0.88.
      Italic keeps it visually distinct from the bold Thai line. */
@@ -115,6 +205,12 @@
     align-items: center;
     gap: 8px;
     transition: opacity 0.15s ease;
+  }
+
+  /* Panel variant — no shadow needed because there's no bright
+     background behind the text. */
+  .subtitle-content.panel .th-text {
+    text-shadow: none;
   }
 
   /* When a new translation is in flight but the previous TH is still

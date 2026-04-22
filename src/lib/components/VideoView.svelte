@@ -100,27 +100,48 @@
 </script>
 
 <div class="video-shell">
-  <video
-    bind:this={videoEl}
-    autoplay
-    muted
-    playsinline
-    disablepictureinpicture
-    disableremoteplayback
-  ></video>
-  <TranslationOverlay />
+  <div class="video-stage">
+    <video
+      bind:this={videoEl}
+      autoplay
+      muted
+      playsinline
+      disablepictureinpicture
+      disableremoteplayback
+    ></video>
+    {#if translation.subtitlePosition === 'overlay_bottom'}
+      <TranslationOverlay variant="overlay" />
+    {/if}
+  </div>
+  {#if translation.subtitlePosition === 'panel_below' && translation.enabled}
+    <TranslationOverlay variant="panel" />
+  {/if}
 </div>
 
 <style>
+  /* Flex column so the translation panel (when enabled) sits below
+     the video without covering game content — which was the main
+     complaint after first-real-JRPG testing. */
   .video-shell {
     flex: 1;
     min-height: 0;
     background: var(--bv-video-bg);
     display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* The video itself — takes all the leftover space. Centred inside
+     its own relative container so overlay-variant subtitles can be
+     absolutely positioned within. */
+  .video-stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
     position: relative;
+    overflow: hidden;
   }
 
   video {

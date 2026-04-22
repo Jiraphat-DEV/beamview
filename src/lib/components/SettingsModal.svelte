@@ -67,7 +67,10 @@
       formVideoId = config.last_video_device_id;
       formAudioId = config.last_audio_device_id;
       formTheme = config.theme;
-      formTranslation = { ...(config.translation ?? DEFAULT_TRANSLATION_CONFIG) };
+      // Spread defaults first so fields added in later schema bumps
+      // (e.g. `subtitle_position` after M5 user feedback) fall back to
+      // their default when the existing on-disk config predates them.
+      formTranslation = { ...DEFAULT_TRANSLATION_CONFIG, ...(config.translation ?? {}) };
       activeTab = 'video';
       el.showModal();
     }
@@ -83,6 +86,8 @@
       formTranslation.fps !== (config.translation?.fps ?? 1.0) ||
       formTranslation.show_english_caption !==
         (config.translation?.show_english_caption ?? false) ||
+      formTranslation.subtitle_position !==
+        (config.translation?.subtitle_position ?? 'panel_below') ||
       JSON.stringify(formTranslation.region) !== JSON.stringify(config.translation?.region ?? null),
   );
 
@@ -103,6 +108,7 @@
       translation.enabled = formTranslation.enabled;
       translation.fps = formTranslation.fps;
       translation.showEnglishCaption = formTranslation.show_english_caption;
+      translation.subtitlePosition = formTranslation.subtitle_position;
       if (formTranslation.region) {
         translation.setRegion(formTranslation.region);
       }
@@ -329,6 +335,41 @@
         <span>แสดง EN caption เหนือ TH</span>
       </label>
 
+      <!-- Subtitle position -->
+      <div class="field">
+        <span class="label">ตำแหน่งคำแปล</span>
+        <div class="tr-position-group" role="radiogroup" aria-label="ตำแหน่งคำแปล">
+          <label class="radio">
+            <input
+              type="radio"
+              name="subtitle-position"
+              value="panel_below"
+              checked={formTranslation.subtitle_position === 'panel_below'}
+              onchange={() =>
+                (formTranslation = { ...formTranslation, subtitle_position: 'panel_below' })}
+            />
+            <span class="radio-label">
+              <strong>แยก panel ใต้วิดีโอ</strong>
+              <span class="hint">ไม่ทับเนื้อหาเกม (แนะนำ)</span>
+            </span>
+          </label>
+          <label class="radio">
+            <input
+              type="radio"
+              name="subtitle-position"
+              value="overlay_bottom"
+              checked={formTranslation.subtitle_position === 'overlay_bottom'}
+              onchange={() =>
+                (formTranslation = { ...formTranslation, subtitle_position: 'overlay_bottom' })}
+            />
+            <span class="radio-label">
+              <strong>ทับวิดีโอด้านล่าง</strong>
+              <span class="hint">กะทัดรัด แต่บังเนื้อหาเกมบางส่วน</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
       <!-- Model status row -->
       <div class="field tr-model-row">
         <span class="label">โมเดลแปลภาษา (NLLB-200)</span>
@@ -508,6 +549,48 @@
     font-size: 13px;
     color: var(--bv-text);
     margin-bottom: var(--bv-space-2);
+  }
+
+  .tr-position-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--bv-space-2);
+  }
+
+  .radio {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--bv-space-3);
+    font-size: 13px;
+    color: var(--bv-text);
+    padding: var(--bv-space-2) var(--bv-space-3);
+    border: 1px solid var(--bv-divider, rgba(26, 26, 26, 0.1));
+    border-radius: 4px;
+    cursor: pointer;
+    transition: border-color 0.12s ease;
+  }
+
+  .radio:has(input:checked) {
+    border-color: var(--bv-text);
+  }
+
+  .radio input[type='radio'] {
+    margin-top: 2px;
+  }
+
+  .radio-label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .radio-label strong {
+    font-weight: 500;
+  }
+
+  .radio-label .hint {
+    font-size: 11px;
+    color: var(--bv-text-subtle);
   }
 
   .hint {

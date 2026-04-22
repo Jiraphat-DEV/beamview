@@ -26,6 +26,22 @@ pub struct ConfigRegion {
     pub height: u32,
 }
 
+/// Where the translated subtitle renders in the app window.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SubtitlePosition {
+    /// Separate panel below the video — does NOT cover game content.
+    /// New default; best for gameplay where every pixel of the game
+    /// matters.
+    #[default]
+    PanelBelow,
+    /// Absolutely-positioned overlay at the bottom of the video frame
+    /// (original M4 behaviour).  Preserved for users who prefer the
+    /// compact look and are willing to accept a small bottom strip of
+    /// game content being covered.
+    OverlayBottom,
+}
+
 /// Translation feature configuration (added in schema v2).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -39,6 +55,12 @@ pub struct TranslationConfig {
     pub fps: f32,
     /// Show the English caption above the Thai overlay.
     pub show_english_caption: bool,
+    /// Where the subtitle overlay/panel renders.  Added after initial
+    /// M4 testing showed the overlay covered game content users cared
+    /// about; new default is `PanelBelow`.  Missing from older v2
+    /// configs → serde default (`panel_below`).
+    #[serde(default)]
+    pub subtitle_position: SubtitlePosition,
 }
 
 impl Default for TranslationConfig {
@@ -54,6 +76,7 @@ impl Default for TranslationConfig {
             // TH together in the overlay lets the user pair them visually
             // instead of guessing which English line is being translated.
             show_english_caption: true,
+            subtitle_position: SubtitlePosition::PanelBelow,
         }
     }
 }
@@ -223,6 +246,7 @@ mod tests {
                 }),
                 fps: 2.0,
                 show_english_caption: true,
+                subtitle_position: SubtitlePosition::OverlayBottom,
             },
         };
         save(&cfg, &path).unwrap();
@@ -402,6 +426,7 @@ mod tests {
                 }),
                 fps: 0.5,
                 show_english_caption: false,
+                subtitle_position: SubtitlePosition::PanelBelow,
             },
         };
         save(&cfg, &path).unwrap();

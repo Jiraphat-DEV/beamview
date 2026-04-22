@@ -54,6 +54,13 @@ class TranslationStore {
    * changed, so the overlay needs to carry its own source-of-truth EN). */
   showEnglishCaption = $state(true);
 
+  /** Where the translated subtitle renders.  `panel_below` is the default
+   *  — a separate panel under the video that does NOT cover game content.
+   *  `overlay_bottom` preserves the original M4 overlay-on-video layout
+   *  for users who prefer the compact look.
+   *  Mirrors `SubtitlePosition` in src-tauri/src/config.rs. */
+  subtitlePosition: 'panel_below' | 'overlay_bottom' = $state('panel_below');
+
   // ── Private ───────────────────────────────────────────────────────────────
 
   /** True when a tick call is still in flight — used to drop overlapping ticks. */

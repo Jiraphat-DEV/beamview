@@ -135,6 +135,13 @@ impl TranslationEngine {
     /// `TranslationConfig` — defaults to `"nllb-200-distilled-600M"`.
     pub fn new(active_model_id: String) -> Result<(Self, ModelStatusHandle), EngineError> {
         let model_store = ModelStore::new()?;
+        // Wipe directories for retired model IDs (e.g. m2m100-418M, removed
+        // because Xenova's tokenizer.json is malformed upstream).  Frees
+        // hundreds of MB so users do not silently keep useless downloads.
+        let reclaimed = model_store.cleanup_orphaned_dirs();
+        if reclaimed > 0 {
+            log::info!("[engine] reclaimed {reclaimed} bytes from retired model dirs");
+        }
         let initial_status = model_store.model_status(&active_model_id);
         let status_handle: ModelStatusHandle = Arc::new(RwLock::new(initial_status));
         let engine = Self {
@@ -529,7 +536,10 @@ mod tests {
     #[test]
     fn list_models_returns_registry() {
         let store = ModelStore::new_with_root(tempfile::TempDir::new().unwrap().path().to_owned());
-        // Verify both catalogue entries are returned.
+        // Verify the catalogue entry is returned.  m2m100-418M was removed
+        // from the registry after testing (Xenova tokenizer.json is
+        // malformed upstream); restore the second-entry assertions when a
+        // working fast-slot model lands.
         let engine = TranslationEngine {
             model_store: store,
             active_model_id: "nllb-200-distilled-600M".to_owned(),
@@ -538,14 +548,10 @@ mod tests {
             stats: CallStats::new(),
         };
         let models = engine.list_models();
-        assert_eq!(models.len(), 2, "catalogue must have 2 entries");
+        assert_eq!(models.len(), 1, "catalogue must have 1 entry (NLLB only)");
         assert_eq!(models[0].id, "nllb-200-distilled-600M");
-        assert_eq!(models[1].id, "m2m100-418M");
-        // Active model is the first one.
         assert!(models[0].is_active);
-        assert!(!models[1].is_active);
-        // Neither is installed in a fresh temp dir.
+        // Not installed in a fresh temp dir.
         assert!(!models[0].installed);
-        assert!(!models[1].installed);
     }
 }

@@ -45,7 +45,12 @@ fn coreml_cache_dir() -> Option<std::path::PathBuf> {
 const EOS_TOKEN_ID: i64 = 2;
 
 /// Maximum new tokens to generate per translation call.
-const MAX_NEW_TOKENS: usize = 200;
+///
+/// JRPG subtitle lines almost never exceed ~20 tokens.  Capping at 48
+/// (was 200) caps worst-case latency at roughly half a second on M4
+/// without truncating real game dialogue.  Sentences hitting the cap
+/// get a trailing `…` from the existing decode loop's EOS handling.
+const MAX_NEW_TOKENS: usize = 48;
 
 // NLLB-200 specifics.
 /// `eng_Latn` special token id (256047).  Prepended by NLLB TemplateProcessing.

@@ -137,6 +137,9 @@ const NLLB_600M_FILES: &[FileSpec] = &[
 
 // ── m2m100-418M (fast slot) ───────────────────────────────────────────────────
 
+// Retained for future re-introduction once a working m2m100 tokenizer
+// source is found.  See MODEL_REGISTRY comment.
+#[allow(dead_code)]
 const M2M100_418M_FILES: &[FileSpec] = &[
     FileSpec {
         url: "https://huggingface.co/Xenova/m2m100_418M/resolve/main/config.json",
@@ -175,24 +178,32 @@ const M2M100_418M_FILES: &[FileSpec] = &[
 /// First entry is the default model (used when `active_model_id` is absent from
 /// the config file, preserving back-compat with configs written before model
 /// picker existed).
-pub static MODEL_REGISTRY: &[ModelSpec] = &[
-    ModelSpec {
-        id: "nllb-200-distilled-600M",
-        display_name: "NLLB-200 Balanced (600M int8)",
-        description: "คุณภาพการแปลสูง ขนาดดาวน์โหลด ~912 MB ต้องการพื้นที่ ~912 MB",
-        size_bytes: 419_120_483 + 475_505_771 + 17_331_224 + 873,
-        arch: ModelArch::Nllb,
-        files: NLLB_600M_FILES,
-    },
-    ModelSpec {
-        id: "m2m100-418M",
-        display_name: "M2M-100 Fast (418M int8)",
-        description: "แปลเร็วกว่า NLLB เล็กน้อย คุณภาพใกล้เคียงกัน ขนาดดาวน์โหลด ~632 MB",
-        size_bytes: 287_856_370 + 344_128_178 + 7_988_527 + 2_423_393 + 1_813 + 908,
-        arch: ModelArch::M2M100,
-        files: M2M100_418M_FILES,
-    },
-];
+///
+/// **m2m100-418M was removed after testing** — Xenova's exported
+/// `tokenizer.json` is malformed (the BPE merges section references
+/// standalone Indic-script tokens like `ଙ` that are absent from the
+/// vocabulary, so `Tokenizer::from_file` rejects the file with
+/// "Token `ଙ` out of vocabulary").  The bug is upstream, not in our
+/// code.  Speed pressure is now addressed by capping
+/// `MAX_NEW_TOKENS = 48` in `translator.rs` (see comment there); a
+/// proper m2m100/scb10x/etc fast-slot model is deferred to Phase 3.
+///
+/// `M2M100_418M_FILES` and `ModelArch::M2M100` are kept (dead-code
+/// allowed) so a future registry entry can pick them up without a
+/// new translator implementation.
+pub static MODEL_REGISTRY: &[ModelSpec] = &[ModelSpec {
+    id: "nllb-200-distilled-600M",
+    display_name: "NLLB-200 Balanced (600M int8)",
+    description: "คุณภาพการแปลสูง ขนาดดาวน์โหลด ~912 MB ต้องการพื้นที่ ~912 MB",
+    size_bytes: 419_120_483 + 475_505_771 + 17_331_224 + 873,
+    arch: ModelArch::Nllb,
+    files: NLLB_600M_FILES,
+}];
+
+/// IDs of registry entries that have been retired.  Their on-disk files
+/// are wiped on app startup via `cleanup_orphaned_dirs()` so users don't
+/// silently keep hundreds of MB of unusable downloads around.
+pub const ORPHANED_MODEL_IDS: &[&str] = &["m2m100-418M"];
 
 // ── ModelStore ────────────────────────────────────────────────────────────────
 
@@ -238,6 +249,46 @@ impl ModelStore {
     /// Return the complete catalogue.
     pub fn list() -> &'static [ModelSpec] {
         MODEL_REGISTRY
+    }
+
+    /// Remove on-disk directories for retired model IDs (see
+    /// `ORPHANED_MODEL_IDS`).  Idempotent: missing directories are
+    /// silently skipped.  Called once at app startup so users do not
+    /// keep hundreds of MB of unusable downloads after a model gets
+    /// pulled from the registry.
+    ///
+    /// Returns the total bytes reclaimed (best-effort; counts size of
+    /// each removed file before deletion).
+    pub fn cleanup_orphaned_dirs(&self) -> u64 {
+        let mut reclaimed: u64 = 0;
+        for orphan in ORPHANED_MODEL_IDS {
+            let dir = self.data_root.join(orphan);
+            if !dir.exists() {
+                continue;
+            }
+            // Sum file sizes before removal (best-effort).
+            if let Ok(walker) = std::fs::read_dir(&dir) {
+                for entry in walker.flatten() {
+                    if let Ok(meta) = entry.metadata() {
+                        if meta.is_file() {
+                            reclaimed += meta.len();
+                        }
+                    }
+                }
+            }
+            match std::fs::remove_dir_all(&dir) {
+                Ok(()) => log::info!(
+                    "[model_store] removed orphaned model dir {} ({} bytes)",
+                    dir.display(),
+                    reclaimed
+                ),
+                Err(e) => log::warn!(
+                    "[model_store] failed to remove orphaned dir {}: {e}",
+                    dir.display()
+                ),
+            }
+        }
+        reclaimed
     }
 
     /// Resolve the directory for a given `model_id`.

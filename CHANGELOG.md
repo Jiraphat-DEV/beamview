@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - unreleased
+## [0.2.0] - 2026-04-23
 
 Offline real-time EN→TH subtitle translation for Nintendo Switch JRPGs.
 The 51 ms render-path latency from v0.1.0 is preserved — translation runs
@@ -156,5 +156,6 @@ a capture card on a Mac.
   `src-tauri/Info.plist` which Tauri auto-merges at build.
 - **Dropped `tauri-plugin-opener`** — unused in Phase 1.
 
-[Unreleased]: https://github.com/Jiraphat-DEV/beamview/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Jiraphat-DEV/beamview/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Jiraphat-DEV/beamview/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Jiraphat-DEV/beamview/releases/tag/v0.1.0

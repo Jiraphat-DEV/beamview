@@ -14,18 +14,22 @@
 
 ## Status
 
-**v0.1.0** — first MVP release. macOS Apple Silicon only, unsigned.
+**v0.2.0** — adds offline real-time EN→TH subtitle translation for
+Nintendo Switch JRPGs on top of the v0.1.0 capture viewer. macOS
+Apple Silicon only, unsigned.
 
 Beamview is a side project that replaces OBS + QuickTime for one
 specific job: playing a console game through a capture card on a
-Mac. Phase 1 ships with `< 100 ms` end-to-end latency as the target,
-a minimal UI that auto-hides while you play, and nothing in the way.
+Mac. v0.1.0 (Phase 1) shipped at **51 ms** measured end-to-end
+latency on M4 — half the `< 100 ms` target. v0.2.0 (Phase 2) adds
+a separate translation pipeline that runs at 1 fps off the render
+path, so the 51 ms baseline is preserved with translation on.
 
 No recording, no streaming, no scene switcher — that is the point.
 
 ## Install
 
-1. Download `Beamview_0.1.0_aarch64.dmg` from the [latest release](https://github.com/Jiraphat-DEV/beamview/releases).
+1. Download `Beamview_0.2.0_aarch64.dmg` from the [latest release](https://github.com/Jiraphat-DEV/beamview/releases).
 2. Open the `.dmg` and drag `Beamview.app` into `/Applications`.
 3. The first launch shows a Gatekeeper warning ("Apple could not
    verify…") because the build is unsigned. **Ctrl-click**
@@ -56,15 +60,52 @@ No recording, no streaming, no scene switcher — that is the point.
   game audio stays intact.
 - Unified log file at `~/Library/Logs/com.beamview.app/beamview.log`.
 
+### Offline subtitle translation _(v0.2.0)_
+
+- **Apple Vision OCR + NLLB-200 translator** — reads English
+  subtitles inside a user-defined region of the live video, then
+  renders the Thai translation as a panel below the game (or as
+  an overlay on top, configurable). 100 % offline once the model
+  is downloaded — no cloud calls, no API keys, no telemetry.
+- **`Cmd+T`** toggles translation on/off; before the model is
+  installed it opens the download modal instead.
+- **Settings → การแปล** holds the toggle, region calibrator, sampling
+  FPS slider (0.5 / 1 / 2), subtitle position picker
+  (panel-below / overlay-bottom), EN-caption-on-TH toggle, and
+  the model picker / installer.
+- **First-run model download ≈ 650 MB** to
+  `~/Library/Application Support/com.beamview.Beamview/models/`.
+  SHA-256 verified, one automatic retry on transient network
+  failure, and a `.ready` sentinel skips re-hashing on next launch.
+  CoreML execution provider on Apple Silicon (`CPUAndNeuralEngine`)
+  with kernel cache at `~/Library/Caches/com.beamview.Beamview/coreml/`.
+- **Cache + dedup** — translations are cached by sha256 of the
+  recognised English text (LRU 1 000 entries). A jaro-winkler
+  near-duplicate check skips re-translating the same on-screen
+  subtitle frame-after-frame. 40–60 % cache hit rate is typical
+  on JRPG cutscenes.
+- **Render path is untouched** — capture card video still streams
+  via `<video>` + `MediaStream` at the v0.1.0 baseline of 51 ms.
+  OCR + translation run on `tokio::spawn_blocking` worker threads
+  at 1 fps; the sampler drops frames if a previous tick is still
+  in flight.
+
+End-to-end overlay latency on M4 MacBook Air (release build,
+CoreML warm) sits at p50 ≈ 1.2 s / p95 ≈ 2.0 s — driven by the
+sequential autoregressive decode loop in NLLB. Subtitle lines
+typically stay on screen for 3–8 s during dialogue, so this is
+usable in practice; cache hits return in < 20 ms.
+
 ## Keyboard shortcuts
 
-| Shortcut        | Action                                    |
-| --------------- | ----------------------------------------- |
-| `Cmd+F` / `F11` | Toggle fullscreen                         |
-| `Cmd+M`         | Mute / unmute audio                       |
-| `Cmd+,`         | Open Settings                             |
-| `Cmd+Q`         | Quit                                      |
-| `Esc`           | Close the top modal, else exit fullscreen |
+| Shortcut        | Action                                                                        |
+| --------------- | ----------------------------------------------------------------------------- |
+| `Cmd+F` / `F11` | Toggle fullscreen                                                             |
+| `Cmd+M`         | Mute / unmute audio                                                           |
+| `Cmd+T`         | Toggle Thai translation overlay (opens download modal if model not installed) |
+| `Cmd+,`         | Open Settings                                                                 |
+| `Cmd+Q`         | Quit                                                                          |
+| `Esc`           | Close the top modal, else exit fullscreen                                     |
 
 ## Develop
 

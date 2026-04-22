@@ -47,7 +47,13 @@ impl Default for TranslationConfig {
             enabled: false,
             region: None,
             fps: 1.0,
-            show_english_caption: false,
+            // Default ON — the EN caption anchors the Thai translation to
+            // its source sentence, which matters because translation lag
+            // (~1–2 s) means the English subtitle on-screen has usually
+            // moved on by the time the Thai overlay appears.  Seeing EN +
+            // TH together in the overlay lets the user pair them visually
+            // instead of guessing which English line is being translated.
+            show_english_caption: true,
         }
     }
 }
@@ -360,7 +366,10 @@ mod tests {
             (cfg.translation.fps - 1.0).abs() < f32::EPSILON,
             "fps must default to 1.0"
         );
-        assert!(!cfg.translation.show_english_caption);
+        // New default: EN caption is ON so users can pair EN→TH visually
+        // despite the ~1–2 s translation lag.  Existing v2 configs that
+        // already persisted `false` continue to round-trip as `false`.
+        assert!(cfg.translation.show_english_caption);
 
         // The on-disk file must also now show schema_version 2.
         let on_disk: serde_json::Value =

@@ -31,7 +31,10 @@ export const DEFAULT_TRANSLATION_CONFIG: TranslationConfig = {
   enabled: false,
   region: null,
   fps: 1.0,
-  show_english_caption: false,
+  // Default ON — helps the user pair EN→TH visually despite the ~1–2 s
+  // translation lag (by the time TH appears, the on-video EN has
+  // usually changed).
+  show_english_caption: true,
 };
 
 export interface AppConfig {

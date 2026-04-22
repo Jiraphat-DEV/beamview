@@ -47,8 +47,12 @@ class TranslationStore {
   /** Frames per second for the sampler (0.5 | 1.0 | 2.0). Default 1.0. */
   fps = $state(1.0);
 
-  /** Whether to show the English caption above the Thai overlay. */
-  showEnglishCaption = $state(false);
+  /** Whether to show the English caption above the Thai overlay.
+   *
+   * Default ON — helps the user pair EN↔TH visually despite the ~1–2 s
+   * translation lag (by the time TH appears, the on-video EN has usually
+   * changed, so the overlay needs to carry its own source-of-truth EN). */
+  showEnglishCaption = $state(true);
 
   // ── Private ───────────────────────────────────────────────────────────────
 

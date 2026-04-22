@@ -1,12 +1,12 @@
-//! Native macOS menu bar (stub).
+//! Native macOS menu bar.
 //!
-//! Phase 1 keeps the menu intentionally minimal: App menu with About +
-//! Preferences + Quit, plus the standard Edit submenu so text fields
-//! inside the webview get the expected Cut/Copy/Paste shortcuts.
+//! App menu: About + Preferences + Quit (+ standard macOS items).
+//! Translation menu: Toggle Translation (Cmd+T).
+//! Edit menu: standard Cut/Copy/Paste/Undo/Redo for webview text fields.
 //!
-//! The `Preferences…` item emits the string event `menu://preferences`
-//! which the frontend subscribes to (Milestone 6, where SettingsModal
-//! lands). Until then the event is received and logged but not acted on.
+//! Custom items emit string events that the frontend subscribes to:
+//!  - `menu://preferences`       → opens SettingsModal
+//!  - `menu://translation-toggle` → toggles translation (same as Cmd+T)
 
 use tauri::menu::{
     AboutMetadataBuilder, Menu, MenuItem, PredefinedMenuItem, Submenu, SubmenuBuilder,
@@ -14,7 +14,10 @@ use tauri::menu::{
 use tauri::{AppHandle, Emitter, Runtime};
 
 pub const PREFERENCES_EVENT: &str = "menu://preferences";
+pub const TRANSLATION_TOGGLE_EVENT: &str = "menu://translation-toggle";
+
 const PREFERENCES_ID: &str = "beamview-preferences";
+const TRANSLATION_TOGGLE_ID: &str = "beamview-translation-toggle";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let about_metadata = AboutMetadataBuilder::new()
@@ -64,16 +67,38 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         ],
     )?;
 
-    Menu::with_items(app, &[&app_menu, &edit_menu])
+    // Translation submenu — Cmd+T is registered as a web-layer hotkey in
+    // App.svelte; the menu item emits the same intent event so the menu bar
+    // works even when the webview doesn't have focus.
+    let translation_toggle = MenuItem::with_id(
+        app,
+        TRANSLATION_TOGGLE_ID,
+        "Toggle Translation",
+        true,
+        Some("CmdOrCtrl+T"),
+    )?;
+
+    let translation_menu = SubmenuBuilder::new(app, "Translation")
+        .item(&translation_toggle)
+        .build()?;
+
+    Menu::with_items(app, &[&app_menu, &edit_menu, &translation_menu])
 }
 
-/// Dispatch menu clicks. Only the `Preferences…` item is custom — everything
-/// else is a `PredefinedMenuItem` handled by Tauri.
+/// Dispatch menu clicks. Custom items emit frontend events; predefined items
+/// are handled by Tauri directly.
 pub fn handle_event<R: Runtime>(app: &AppHandle<R>, event_id: &str) {
-    if event_id == PREFERENCES_ID {
-        match app.emit(PREFERENCES_EVENT, ()) {
+    match event_id {
+        PREFERENCES_ID => match app.emit(PREFERENCES_EVENT, ()) {
             Ok(()) => log::info!("preferences menu clicked — emitted {PREFERENCES_EVENT}"),
             Err(e) => log::warn!("failed to emit preferences event: {e}"),
-        }
+        },
+        TRANSLATION_TOGGLE_ID => match app.emit(TRANSLATION_TOGGLE_EVENT, ()) {
+            Ok(()) => {
+                log::info!("translation toggle menu clicked — emitted {TRANSLATION_TOGGLE_EVENT}")
+            }
+            Err(e) => log::warn!("failed to emit translation-toggle event: {e}"),
+        },
+        _ => {}
     }
 }

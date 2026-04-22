@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -13,6 +13,47 @@ pub enum Theme {
     Dark,
     #[default]
     System,
+}
+
+/// A rectangular region within a video frame (pixel coordinates, top-left
+/// origin).  Mirrors `translation::types::Region` without importing from
+/// that module so `config.rs` stays platform-agnostic (OCR is macOS-only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ConfigRegion {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Translation feature configuration (added in schema v2).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TranslationConfig {
+    /// Whether the 1-fps sampling loop is enabled on startup.
+    pub enabled: bool,
+    /// Last-used subtitle region in the video's native coordinate space.
+    pub region: Option<ConfigRegion>,
+    /// Frames per second for the sampler (0.5 | 1.0 | 2.0). Default 1.0.
+    #[serde(default = "default_fps")]
+    pub fps: f32,
+    /// Show the English caption above the Thai overlay.
+    pub show_english_caption: bool,
+}
+
+impl Default for TranslationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            region: None,
+            fps: 1.0,
+            show_english_caption: false,
+        }
+    }
+}
+
+fn default_fps() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -27,6 +68,8 @@ pub struct AppConfig {
     /// Welcome flow. Gates the welcome screen rendering in the UI.
     /// Added in Milestone 6; absent in older configs → serde default (false).
     pub welcome_dismissed: bool,
+    /// Translation feature settings (added in schema v2).
+    pub translation: TranslationConfig,
 }
 
 impl Default for AppConfig {
@@ -38,6 +81,7 @@ impl Default for AppConfig {
             theme: Theme::System,
             hotkeys: default_hotkeys(),
             welcome_dismissed: false,
+            translation: TranslationConfig::default(),
         }
     }
 }
@@ -77,8 +121,11 @@ pub fn default_config_path() -> Result<PathBuf, ConfigError> {
 ///
 /// Schema migration is driven by the top-level `schema_version` field:
 ///
-/// - Missing (implicit v0) or `1`: parsed as the current struct. Missing fields
-///   fall back to `AppConfig::default()` via the container-level `#[serde(default)]`.
+/// - Missing (implicit v0), `1`, or `2`: parsed as the current struct.  Missing
+///   fields fall back to defaults via the container-level `#[serde(default)]`.
+///   v1 configs are parsed into v2 layout (the `translation` sub-struct is
+///   absent in v1, so `#[serde(default)]` fills it in) and then saved back so
+///   the file on disk reflects the new schema version.
 /// - Anything higher: returns `UnsupportedSchemaVersion` so callers can prompt
 ///   the user instead of silently downgrading data written by a newer build.
 pub fn load(path: &Path) -> Result<AppConfig, ConfigError> {
@@ -92,7 +139,18 @@ pub fn load(path: &Path) -> Result<AppConfig, ConfigError> {
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     match version {
-        0 | 1 => Ok(serde_json::from_value(value)?),
+        0 | 1 => {
+            // Parse into the current struct — #[serde(default)] fills in the
+            // new `translation` block that was absent in v1.
+            let mut cfg: AppConfig = serde_json::from_value(value)?;
+            // Bump the version so the on-disk file stays up to date.
+            cfg.schema_version = CURRENT_SCHEMA_VERSION;
+            // Best-effort write-back; if it fails we continue with the
+            // in-memory value (next launch will migrate again — harmless).
+            let _ = save(&cfg, path);
+            Ok(cfg)
+        }
+        2 => Ok(serde_json::from_value(value)?),
         other => Err(ConfigError::UnsupportedSchemaVersion(other)),
     }
 }
@@ -149,6 +207,17 @@ mod tests {
             theme: Theme::Dark,
             hotkeys: default_hotkeys(),
             welcome_dismissed: true,
+            translation: TranslationConfig {
+                enabled: true,
+                region: Some(ConfigRegion {
+                    x: 0,
+                    y: 756,
+                    width: 1920,
+                    height: 324,
+                }),
+                fps: 2.0,
+                show_english_caption: true,
+            },
         };
         save(&cfg, &path).unwrap();
         let loaded = load(&path).unwrap();
@@ -245,5 +314,91 @@ mod tests {
         }
         // Verify the lowercase rename.
         assert_eq!(serde_json::to_string(&Theme::Dark).unwrap(), "\"dark\"");
+    }
+
+    /// Loading a v1 JSON fixture must:
+    ///  1. succeed (no error),
+    ///  2. produce schema_version == 2,
+    ///  3. fill `translation` with defaults (enabled=false, region=None, fps=1.0),
+    ///  4. save back to disk so the file now reflects schema_version 2.
+    #[test]
+    fn v1_migrates_to_v2() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        // Write a realistic v1 fixture (no `translation` field).
+        std::fs::write(
+            &path,
+            r#"{
+  "schema_version": 1,
+  "last_video_device_id": "cam-001",
+  "last_audio_device_id": null,
+  "theme": "dark",
+  "hotkeys": {},
+  "welcome_dismissed": true
+}"#,
+        )
+        .unwrap();
+
+        let cfg = load(&path).unwrap();
+
+        // Version must be bumped.
+        assert_eq!(
+            cfg.schema_version, 2,
+            "schema_version must be 2 after migration"
+        );
+        // User data preserved.
+        assert_eq!(cfg.last_video_device_id.as_deref(), Some("cam-001"));
+        assert_eq!(cfg.theme, Theme::Dark);
+        assert!(cfg.welcome_dismissed);
+        // Translation defaults applied.
+        assert!(!cfg.translation.enabled, "enabled must default to false");
+        assert!(
+            cfg.translation.region.is_none(),
+            "region must default to None"
+        );
+        assert!(
+            (cfg.translation.fps - 1.0).abs() < f32::EPSILON,
+            "fps must default to 1.0"
+        );
+        assert!(!cfg.translation.show_english_caption);
+
+        // The on-disk file must also now show schema_version 2.
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            on_disk["schema_version"], 2,
+            "disk file must be bumped to v2"
+        );
+    }
+
+    /// Loading a v2 file with a populated TranslationConfig must round-trip exactly.
+    #[test]
+    fn v2_round_trip_with_translation_config() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let cfg = AppConfig {
+            schema_version: 2,
+            last_video_device_id: None,
+            last_audio_device_id: None,
+            theme: Theme::System,
+            hotkeys: default_hotkeys(),
+            welcome_dismissed: false,
+            translation: TranslationConfig {
+                enabled: false,
+                region: Some(ConfigRegion {
+                    x: 100,
+                    y: 800,
+                    width: 1720,
+                    height: 200,
+                }),
+                fps: 0.5,
+                show_english_caption: false,
+            },
+        };
+        save(&cfg, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded, cfg);
+        assert_eq!(loaded.translation.fps, 0.5_f32);
+        assert_eq!(loaded.translation.region.unwrap().x, 100);
     }
 }

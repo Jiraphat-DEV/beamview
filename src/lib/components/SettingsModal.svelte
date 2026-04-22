@@ -2,12 +2,16 @@
   import { X } from 'lucide-svelte';
   import { onMount } from 'svelte';
   import { commands } from '$lib/ipc';
-  import type { AppConfig, Theme } from '$lib/ipc';
+  import type { AppConfig, Theme, TranslationConfig } from '$lib/ipc';
+  import { DEFAULT_TRANSLATION_CONFIG } from '$lib/ipc';
   import { displayLabel } from '$lib/capture/devices';
   import { devices } from '$lib/stores/devices.svelte';
   import { ui } from '$lib/stores/ui.svelte';
+  import { translation } from '$lib/stores/translation.svelte';
+  import ModelDownloadModal from './ModelDownloadModal.svelte';
+  import RegionSelector from './RegionSelector.svelte';
 
-  // Modal with Video / Audio / About tabs.
+  // Modal with Video / Audio / About / Translation tabs.
   //
   // Follows the "explicit save only" pattern (spec §1.4, §8.6): a
   // local copy of the editable fields is compared against `config`
@@ -24,18 +28,24 @@
     config: AppConfig;
     onSave: (cfg: AppConfig, deviceChanged: boolean) => void | Promise<void>;
     onClose: () => void;
+    /** The live <video> element from VideoView — needed by RegionSelector. */
+    videoEl?: HTMLVideoElement | null;
   }
 
-  let { open, config, onSave, onClose }: Props = $props();
+  let { open, config, onSave, onClose, videoEl = null }: Props = $props();
 
-  type Tab = 'video' | 'audio' | 'about';
+  type Tab = 'video' | 'audio' | 'about' | 'translation';
   let activeTab = $state<Tab>('video');
 
   let formVideoId = $state<string | null>(null);
   let formAudioId = $state<string | null>(null);
   let formTheme = $state<Theme>('system');
+  // Translation form state — local until Save.
+  let formTranslation = $state<TranslationConfig>({ ...DEFAULT_TRANSLATION_CONFIG });
   let saving = $state(false);
   let version = $state<string>('');
+  let showDownloadModal = $state(false);
+  let showRegionSelector = $state(false);
 
   let dialogEl = $state<HTMLDialogElement | null>(null);
 
@@ -57,6 +67,7 @@
       formVideoId = config.last_video_device_id;
       formAudioId = config.last_audio_device_id;
       formTheme = config.theme;
+      formTranslation = { ...(config.translation ?? DEFAULT_TRANSLATION_CONFIG) };
       activeTab = 'video';
       el.showModal();
     }
@@ -66,7 +77,16 @@
   const deviceChanged = $derived(
     formVideoId !== config.last_video_device_id || formAudioId !== config.last_audio_device_id,
   );
-  const dirty = $derived(deviceChanged || formTheme !== config.theme);
+
+  const translationChanged = $derived(
+    formTranslation.enabled !== (config.translation?.enabled ?? false) ||
+      formTranslation.fps !== (config.translation?.fps ?? 1.0) ||
+      formTranslation.show_english_caption !==
+        (config.translation?.show_english_caption ?? false) ||
+      JSON.stringify(formTranslation.region) !== JSON.stringify(config.translation?.region ?? null),
+  );
+
+  const dirty = $derived(deviceChanged || formTheme !== config.theme || translationChanged);
 
   async function handleSave() {
     saving = true;
@@ -76,7 +96,16 @@
         last_video_device_id: formVideoId,
         last_audio_device_id: formAudioId,
         theme: formTheme,
+        translation: { ...formTranslation },
       };
+      // Sync the translation store with the saved values so hotkey state
+      // and config state stay in sync immediately.
+      translation.enabled = formTranslation.enabled;
+      translation.fps = formTranslation.fps;
+      translation.showEnglishCaption = formTranslation.show_english_caption;
+      if (formTranslation.region) {
+        translation.setRegion(formTranslation.region);
+      }
       await onSave(newCfg, deviceChanged);
     } finally {
       saving = false;
@@ -89,6 +118,54 @@
 
   function handleDialogClose() {
     if (open) handleCancel();
+  }
+
+  function openDownloadModal() {
+    showDownloadModal = true;
+    ui.pushModal('model-download');
+  }
+
+  function openRegionSelector() {
+    if (!videoEl) return;
+    showRegionSelector = true;
+    ui.pushModal('region-selector');
+  }
+
+  // Close the region selector when it pops itself from the modal stack.
+  // It calls ui.popModal('region-selector'); we detect when the modal
+  // disappears from the stack and reset our local flag.
+  $effect(() => {
+    if (showRegionSelector && !ui.modalStack.includes('region-selector')) {
+      showRegionSelector = false;
+      // Pick up the region that RegionSelector may have saved.
+      if (translation.region) {
+        formTranslation = { ...formTranslation, region: translation.region };
+      }
+    }
+  });
+
+  // Close the download modal when it pops itself from the modal stack.
+  $effect(() => {
+    if (showDownloadModal && !ui.modalStack.includes('model-download')) {
+      showDownloadModal = false;
+    }
+  });
+
+  function regionPreviewText(cfg: TranslationConfig): string {
+    const r = cfg.region;
+    if (!r) return 'ยังไม่ได้เลือก';
+    return `x:${r.x} y:${r.y}  ${r.width}×${r.height}`;
+  }
+
+  function modelStatusLabel(): string {
+    const s = translation.modelStatus;
+    if (s.type === 'ready') return 'ติดตั้งแล้ว';
+    if (s.type === 'downloading') {
+      const pct = s.total > 0 ? Math.round((s.bytes / s.total) * 100) : 0;
+      return `กำลังดาวน์โหลด… ${pct}%`;
+    }
+    if (s.type === 'failed') return `ล้มเหลว: ${s.message}`;
+    return 'ยังไม่ติดตั้ง (~650 MB)';
   }
 </script>
 
@@ -116,6 +193,14 @@
       onclick={() => (activeTab = 'audio')}
     >
       Audio
+    </button>
+    <button
+      type="button"
+      class="tab"
+      class:active={activeTab === 'translation'}
+      onclick={() => (activeTab = 'translation')}
+    >
+      การแปล
     </button>
     <button
       type="button"
@@ -171,6 +256,96 @@
         <span>Mute audio</span>
       </label>
       <p class="hint">Volume and mute apply immediately and persist for the session only.</p>
+    {:else if activeTab === 'translation'}
+      <!-- Toggle: enable real-time translation -->
+      <label class="toggle">
+        <input
+          type="checkbox"
+          checked={formTranslation.enabled}
+          onchange={(e) =>
+            (formTranslation = {
+              ...formTranslation,
+              enabled: (e.currentTarget as HTMLInputElement).checked,
+            })}
+        />
+        <span>เปิดการแปลแบบเรียลไทม์</span>
+      </label>
+
+      <!-- Region selector -->
+      <div class="field tr-region-field">
+        <span class="label">พื้นที่ subtitle</span>
+        <div class="tr-region-row">
+          <span class="bv-mono region-preview">{regionPreviewText(formTranslation)}</span>
+          <button
+            type="button"
+            class="btn-sm"
+            onclick={openRegionSelector}
+            disabled={!videoEl}
+            title={videoEl ? 'เลือกพื้นที่ subtitle บนภาพ' : 'เริ่มสตรีมก่อนเพื่อเลือกพื้นที่'}
+          >
+            เลือกพื้นที่ subtitle
+          </button>
+        </div>
+        {#if !videoEl}
+          <p class="hint">เริ่มสตรีมก่อนเพื่อเปิดตัวเลือกพื้นที่</p>
+        {/if}
+      </div>
+
+      <!-- FPS slider -->
+      <div class="field">
+        <span class="label">ความถี่การวิเคราะห์</span>
+        <div class="slider-row">
+          <input
+            type="range"
+            min="0"
+            max="2"
+            step="1"
+            value={formTranslation.fps === 0.5 ? 0 : formTranslation.fps === 1.0 ? 1 : 2}
+            oninput={(e) => {
+              const v = Number((e.currentTarget as HTMLInputElement).value);
+              formTranslation = {
+                ...formTranslation,
+                fps: v === 0 ? 0.5 : v === 1 ? 1.0 : 2.0,
+              };
+            }}
+          />
+          <span class="value bv-mono">
+            {formTranslation.fps === 0.5 ? '0.5' : formTranslation.fps === 1.0 ? '1' : '2'} fps
+          </span>
+        </div>
+      </div>
+
+      <!-- Show EN caption toggle -->
+      <label class="toggle">
+        <input
+          type="checkbox"
+          checked={formTranslation.show_english_caption}
+          onchange={(e) =>
+            (formTranslation = {
+              ...formTranslation,
+              show_english_caption: (e.currentTarget as HTMLInputElement).checked,
+            })}
+        />
+        <span>แสดง EN caption เหนือ TH</span>
+      </label>
+
+      <!-- Model status row -->
+      <div class="field tr-model-row">
+        <span class="label">โมเดลแปลภาษา (NLLB-200)</span>
+        <div class="tr-model-status-row">
+          <span class="model-status-text">{modelStatusLabel()}</span>
+          {#if translation.modelStatus.type !== 'ready'}
+            <button type="button" class="btn-sm" onclick={openDownloadModal}>
+              {translation.modelStatus.type === 'failed' ? 'ติดตั้งใหม่' : 'ดาวน์โหลด'}
+            </button>
+          {/if}
+        </div>
+      </div>
+
+      <p class="hint tr-about">
+        ใช้โมเดล NLLB-200-distilled-600M จาก Meta AI — ทำงานแบบออฟไลน์สมบูรณ์
+        ดาวน์โหลดเพียงครั้งเดียว (~650 MB) ไม่มีการส่งข้อมูลออกสู่อินเทอร์เน็ต
+      </p>
     {:else}
       <section class="about">
         <p class="about-name">Beamview</p>
@@ -208,6 +383,14 @@
     </button>
   </footer>
 </dialog>
+
+{#if showDownloadModal}
+  <ModelDownloadModal />
+{/if}
+
+{#if showRegionSelector && videoEl}
+  <RegionSelector {videoEl} />
+{/if}
 
 <style>
   .modal {
@@ -413,5 +596,62 @@
   }
   .btn.accent:hover:not(:disabled) {
     background: color-mix(in srgb, var(--bv-accent) 90%, black);
+  }
+
+  /* ── Translation tab ────────────────────────────────────────────────────── */
+
+  .tr-region-field,
+  .tr-model-row {
+    margin-bottom: var(--bv-space-4);
+  }
+
+  .tr-region-row,
+  .tr-model-status-row {
+    display: flex;
+    align-items: center;
+    gap: var(--bv-space-3);
+    flex-wrap: wrap;
+  }
+
+  .region-preview {
+    font-size: 12px;
+    color: var(--bv-text-muted);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .model-status-text {
+    font-size: 12px;
+    color: var(--bv-text-muted);
+    flex: 1;
+  }
+
+  .btn-sm {
+    padding: 5px 12px;
+    border: 1px solid var(--bv-border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--bv-text);
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background var(--bv-dur-fast) var(--bv-ease),
+      color var(--bv-dur-fast) var(--bv-ease);
+  }
+  .btn-sm:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .btn-sm:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--bv-text) 6%, transparent);
+  }
+
+  .tr-about {
+    margin-top: var(--bv-space-4);
+    line-height: 1.6;
   }
 </style>

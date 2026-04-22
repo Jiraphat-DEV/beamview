@@ -10,7 +10,7 @@ use tauri::Manager;
 use tokio::sync::Mutex;
 
 use commands::TranslationEngineState;
-use translation::engine::TranslationEngine;
+use translation::engine::{ModelStatusHandle, TranslationEngine};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -23,12 +23,16 @@ pub fn run() {
             // Initialise the TranslationEngine.  If the model-store directory
             // cannot be resolved (e.g. Application Support is missing) this
             // returns an Err and setup() fails loudly — the app will not start.
-            let engine = TranslationEngine::new().map_err(|e| {
+            let (engine, status_handle) = TranslationEngine::new().map_err(|e| {
                 log::error!("TranslationEngine::new failed: {e}");
                 e
             })?;
             let state: TranslationEngineState = Arc::new(Mutex::new(engine));
             app.manage(state);
+            // Register the non-blocking status handle separately so
+            // get_translation_model_status never waits on the engine mutex.
+            let handle: ModelStatusHandle = status_handle;
+            app.manage(handle);
 
             let handle = app.handle().clone();
             let menu = menu::build(&handle)?;

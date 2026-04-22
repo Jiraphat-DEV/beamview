@@ -6,7 +6,8 @@ use tokio::sync::Mutex;
 
 use crate::config::{self, AppConfig};
 use crate::translation::{
-    engine::TranslationEngine, EngineError, ModelStatus, OcrTranslateResult, Region,
+    engine::{ModelStatusHandle, TranslationEngine},
+    EngineError, ModelStatus, OcrTranslateResult, Region,
 };
 
 /// Shared state type for the translation engine.
@@ -97,12 +98,15 @@ pub async fn ocr_translate(
 }
 
 /// Return the current model status without downloading anything.
+///
+/// Reads from the `ModelStatusHandle` (an `Arc<RwLock<ModelStatus>>`) that is
+/// stored as separate Tauri state.  This never acquires the engine mutex, so
+/// it cannot block for 5 minutes during a large download (carry-over B).
 #[tauri::command]
-pub async fn get_translation_model_status(
-    state: tauri::State<'_, TranslationEngineState>,
+pub fn get_translation_model_status(
+    status: tauri::State<'_, ModelStatusHandle>,
 ) -> Result<ModelStatus, String> {
-    let engine = state.lock().await;
-    Ok(engine.model_status())
+    Ok(status.read().unwrap().clone())
 }
 
 /// Download the NLLB-200 model files (first-run, ~900 MB) and load the
@@ -115,10 +119,11 @@ pub async fn get_translation_model_status(
 pub async fn download_translation_model(
     app: AppHandle,
     state: tauri::State<'_, TranslationEngineState>,
+    status: tauri::State<'_, ModelStatusHandle>,
 ) -> Result<(), String> {
     let mut engine = state.lock().await;
     engine
-        .ensure_ready(&app)
+        .ensure_ready(&app, &status.inner().clone())
         .await
         .map_err(|e: EngineError| e.to_string())
 }

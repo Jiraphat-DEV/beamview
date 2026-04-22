@@ -4,6 +4,7 @@
   import { translation } from '$lib/stores/translation.svelte';
   import { FrameSampler } from '$lib/services/frameSampler';
   import { logger } from '$lib/logger';
+  import TranslationOverlay from './TranslationOverlay.svelte';
 
   // The `muted` attribute is deliberate — audio routes through the
   // Web Audio pipeline in $lib/audio/context. Without `muted`, macOS
@@ -13,7 +14,13 @@
   // WebKit-native overlay controls that would otherwise appear on
   // Safari/WKWebView when the user right-clicks the video.
 
-  let videoEl: HTMLVideoElement | null = $state(null);
+  interface Props {
+    // Expose the underlying <video> element so parent components (e.g.
+    // RegionSelector) can capture a freeze-frame against the live stream.
+    videoEl?: HTMLVideoElement | null;
+  }
+
+  let { videoEl = $bindable(null) }: Props = $props();
   let sampler: FrameSampler | null = null;
 
   $effect(() => {
@@ -38,7 +45,7 @@
         sampler = new FrameSampler({
           videoEl: el,
           getRegion: () => translation.region,
-          fps: 1,
+          fps: translation.fps,
           onResult: (result) => {
             // Update store so M4 can render the overlay.
             translation.en = result.en;
@@ -69,7 +76,9 @@
       sampler.stop();
       sampler = null;
     }
-    translation.destroy();
+    // translation.destroy() has been moved to App.svelte's onDestroy (M4
+    // carry-over C) so the progress listener lives for the app's full lifetime
+    // and is not torn down when the stream drops and VideoView unmounts.
   });
 
   // M3: Expose a debug harness on window.__beamviewDebug (DEV only).
@@ -115,6 +124,7 @@
     disablepictureinpicture
     disableremoteplayback
   ></video>
+  <TranslationOverlay />
 </div>
 
 <style>
@@ -126,6 +136,7 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    position: relative;
   }
 
   video {

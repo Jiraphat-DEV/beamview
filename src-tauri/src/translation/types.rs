@@ -115,5 +115,55 @@ pub enum ModelStatus {
     /// All model files are present and verified.
     Ready,
     /// The last download or verify attempt failed.
-    Failed(String),
+    Failed { message: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ModelStatus::Failed` must serialise as `{ "type": "failed", "message": "..." }`
+    /// — not the tuple-variant shape `{ "type": "failed", "0": "..." }` that
+    /// existed in M3.  This test pins that contract so we don't regress.
+    #[test]
+    fn model_status_failed_json_shape() {
+        let status = ModelStatus::Failed {
+            message: "network timeout".to_owned(),
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "failed", "type tag must be 'failed'");
+        assert_eq!(
+            v["message"], "network timeout",
+            "field must be 'message', not '0'"
+        );
+        assert!(
+            v.get("0").is_none(),
+            "old tuple-variant '0' key must not exist"
+        );
+    }
+
+    /// Round-trip all variants to confirm serde symmetry.
+    #[test]
+    fn model_status_all_variants_round_trip() {
+        let cases: Vec<ModelStatus> = vec![
+            ModelStatus::NotInstalled,
+            ModelStatus::Downloading {
+                bytes: 1024,
+                total: 2048,
+            },
+            ModelStatus::Ready,
+            ModelStatus::Failed {
+                message: "oops".to_owned(),
+            },
+        ];
+        for case in cases {
+            let json = serde_json::to_string(&case).unwrap();
+            let back: ModelStatus = serde_json::from_str(&json).unwrap();
+            // Can't use PartialEq without deriving it; check type tag instead.
+            let orig_tag = serde_json::to_value(&case).unwrap()["type"].clone();
+            let back_tag = serde_json::to_value(&back).unwrap()["type"].clone();
+            assert_eq!(orig_tag, back_tag);
+        }
+    }
 }

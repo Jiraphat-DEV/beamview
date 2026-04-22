@@ -39,7 +39,7 @@ export type ModelStatus =
   | { type: 'not_installed' }
   | { type: 'downloading'; bytes: number; total: number }
   | { type: 'ready' }
-  | { type: 'failed'; 0: string };
+  | { type: 'failed'; message: string };
 
 /** Result of a single OCR-translate cycle. */
 export type OcrTranslateResult = {

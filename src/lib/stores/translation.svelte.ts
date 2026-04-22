@@ -44,6 +44,12 @@ class TranslationStore {
   /** Last error message from `tick` or `downloadModel`. */
   lastError: string | null = $state(null);
 
+  /** Frames per second for the sampler (0.5 | 1.0 | 2.0). Default 1.0. */
+  fps = $state(1.0);
+
+  /** Whether to show the English caption above the Thai overlay. */
+  showEnglishCaption = $state(false);
+
   // ── Private ───────────────────────────────────────────────────────────────
 
   /** True when a tick call is still in flight — used to drop overlapping ticks. */
@@ -101,7 +107,7 @@ class TranslationStore {
     } catch (err) {
       const msg = String(err);
       this.lastError = msg;
-      this.modelStatus = { type: 'failed', 0: msg };
+      this.modelStatus = { type: 'failed', message: msg };
       logger.error('[translation] downloadModel failed', { err: msg });
     }
   }

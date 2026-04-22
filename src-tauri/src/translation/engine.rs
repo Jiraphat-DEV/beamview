@@ -105,6 +105,28 @@ impl TranslationEngine {
         Ok(())
     }
 
+    /// If the model files are already on disk but the translator is not yet
+    /// loaded (typical after an app restart), load it synchronously on the
+    /// blocking pool.  Never downloads — pure disk-to-memory load.
+    ///
+    /// Returns `Ok(true)` when the translator is loaded (or was already
+    /// loaded), `Ok(false)` when the model files are missing and a real
+    /// `ensure_ready` with an `AppHandle` is still required.
+    async fn load_from_disk_if_present(&mut self) -> Result<bool, EngineError> {
+        if self.translator.is_some() {
+            return Ok(true);
+        }
+        if !matches!(self.model_store.model_status(), ModelStatus::Ready) {
+            return Ok(false);
+        }
+        let model_dir = self.model_store.model_dir().to_owned();
+        let translator = tokio::task::spawn_blocking(move || Translator::load(&model_dir))
+            .await
+            .map_err(|e| EngineError::BlockingPanic(e.to_string()))??;
+        self.translator = Some(translator);
+        Ok(true)
+    }
+
     /// Decode JPEG → RGBA → OCR (optional region crop) → dedup/cache lookup
     /// → translate → cache insert → return.
     ///
@@ -121,7 +143,13 @@ impl TranslationEngine {
         jpeg_bytes: Vec<u8>,
         region: Option<Region>,
     ) -> Result<Option<OcrTranslateResult>, EngineError> {
-        if self.translator.is_none() {
+        // Auto-heal: after an app restart the Rust engine is fresh
+        // (translator = None) but model files may still be on disk.  Load
+        // them synchronously so the sampler does not need to wait for an
+        // explicit download_translation_model call from the frontend.
+        // Never downloads from this path — that is reserved for the
+        // explicit `download_translation_model` command.
+        if !self.load_from_disk_if_present().await? {
             return Err(EngineError::ModelNotReady);
         }
 
@@ -252,19 +280,28 @@ mod tests {
     use super::*;
 
     /// Verify that `ocr_translate` returns `EngineError::ModelNotReady` when
-    /// no model has been loaded.
+    /// the model files are missing from disk (and the translator is not
+    /// loaded).  Uses a tempdir-backed ModelStore so the assertion is stable
+    /// regardless of whether the real user app-data dir happens to be seeded.
     #[tokio::test]
-    async fn ocr_translate_errors_when_model_not_ready() {
-        let mut engine = TranslationEngine::new().expect("TranslationEngine::new");
-        // Model is not loaded — translator is None.
-        assert!(
-            engine.translator.is_none(),
-            "translator should be None before ensure_ready"
-        );
+    async fn ocr_translate_errors_when_no_model_files() {
+        use crate::translation::model_store::ModelStore;
+        use tempfile::TempDir;
 
-        // A minimal 1×1 JPEG (valid file so JPEG decode succeeds, but OCR
-        // should short-circuit before reaching the translator check — however
-        // we gate on translator.is_none() BEFORE touching the JPEG).
+        let tmp = TempDir::new().expect("tempdir");
+        let mut engine = TranslationEngine {
+            model_store: ModelStore::new_with_dir(tmp.path().to_owned()),
+            translator: None,
+            cache: TranslationCache::new(),
+        };
+
+        // Confirm precondition: no sentinel, translator not loaded.
+        assert!(matches!(
+            engine.model_store.model_status(),
+            ModelStatus::NotInstalled
+        ));
+        assert!(engine.translator.is_none());
+
         let dummy_jpeg = vec![0u8; 10];
         let err = engine
             .ocr_translate(dummy_jpeg, None)

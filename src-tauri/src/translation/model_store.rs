@@ -115,6 +115,13 @@ impl ModelStore {
         Ok(Self { model_dir })
     }
 
+    /// Construct a ModelStore pointing at a specific directory.  Intended for
+    /// tests — production code should use `ModelStore::new()`.
+    #[cfg(test)]
+    pub fn new_with_dir(model_dir: PathBuf) -> Self {
+        Self { model_dir }
+    }
+
     /// Absolute path to the model directory — used by `Translator::load`.
     pub fn model_dir(&self) -> &Path {
         &self.model_dir

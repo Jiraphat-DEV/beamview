@@ -103,6 +103,21 @@
   async function handleSave() {
     saving = true;
     try {
+      // Hot-swap the translator FIRST — if it fails (model files missing /
+      // translator load error / arch mismatch) we do not want to persist
+      // a config that the backend will refuse on next launch.
+      const prevModelId = config.translation?.active_model_id ?? 'nllb-200-distilled-600M';
+      if (formTranslation.active_model_id !== prevModelId) {
+        try {
+          await translation.setActiveModel(formTranslation.active_model_id);
+        } catch (err) {
+          // Surface the backend error so the user knows why save failed
+          // instead of clicking Save and getting nothing.
+          ui.showToast(`สลับโมเดลล้มเหลว: ${String(err)}`, 'error');
+          return; // abort save; leave settings open so user can retry
+        }
+      }
+
       const newCfg: AppConfig = {
         ...config,
         last_video_device_id: formVideoId,
@@ -119,12 +134,12 @@
       if (formTranslation.region) {
         translation.setRegion(formTranslation.region);
       }
-      // If the active model changed, hot-swap the translator in Rust.
-      const prevModelId = config.translation?.active_model_id ?? 'nllb-200-distilled-600M';
-      if (formTranslation.active_model_id !== prevModelId) {
-        await translation.setActiveModel(formTranslation.active_model_id);
+
+      try {
+        await onSave(newCfg, deviceChanged);
+      } catch (err) {
+        ui.showToast(`บันทึกล้มเหลว: ${String(err)}`, 'error');
       }
-      await onSave(newCfg, deviceChanged);
     } finally {
       saving = false;
     }
@@ -441,7 +456,28 @@
                     >
                       {downloadingModelId === m.id ? 'กำลังดาวน์โหลด…' : 'ดาวน์โหลด'}
                     </button>
-                  {:else if !m.is_active && formTranslation.active_model_id !== m.id}
+                  {:else if formTranslation.active_model_id === m.id}
+                    <!-- Selected in form (will be active after Save).
+                         Delete disabled because we cannot remove the model
+                         we are about to switch into. -->
+                    {#if !m.is_active}
+                      <span class="hint">จะเปิดใช้งานเมื่อกด Save</span>
+                    {/if}
+                    <button
+                      type="button"
+                      class="btn-sm danger"
+                      disabled
+                      title="ไม่สามารถลบโมเดลที่เลือกใช้งานได้"
+                    >
+                      ลบ
+                    </button>
+                  {:else}
+                    <!-- Installed but not selected in form: user can switch
+                         to it OR delete it.  Backend deletion of the
+                         currently-Rust-active model only succeeds after a
+                         Save flips the active model first; the toast
+                         from handleDeleteModel surfaces any backend
+                         refusal. -->
                     <button
                       type="button"
                       class="btn-sm accent"
@@ -454,20 +490,10 @@
                       type="button"
                       class="btn-sm danger"
                       onclick={() => handleDeleteModel(m)}
-                      disabled={translation.switchingModel}
-                    >
-                      ลบ
-                    </button>
-                  {:else if formTranslation.active_model_id === m.id && !m.is_active}
-                    <!-- Will become active on Save -->
-                    <span class="hint">จะเปิดใช้งานเมื่อกด Save</span>
-                  {:else}
-                    <!-- Active model: show delete disabled with tooltip -->
-                    <button
-                      type="button"
-                      class="btn-sm danger"
-                      disabled
-                      title="ไม่สามารถลบโมเดลที่กำลังใช้งานได้"
+                      disabled={translation.switchingModel || m.is_active}
+                      title={m.is_active
+                        ? 'โมเดลนี้กำลังใช้งานอยู่ — บันทึกการเปลี่ยนโมเดลก่อนแล้วค่อยลบ'
+                        : ''}
                     >
                       ลบ
                     </button>

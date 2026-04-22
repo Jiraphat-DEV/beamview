@@ -1,5 +1,6 @@
 <script lang="ts">
   import { X } from 'lucide-svelte';
+  import { onMount } from 'svelte';
   import { translation } from '$lib/stores/translation.svelte';
   import { ui } from '$lib/stores/ui.svelte';
 
@@ -9,12 +10,9 @@
   // specific catalogue model.  When omitted (legacy call from the old flow)
   // it downloads the active model.
   //
-  // Lifecycle:
-  //  - "ดาวน์โหลดโมเดล" → calls translation.downloadModel(modelId)
-  //  - While Downloading  → progress bar + bytes/total + %
-  //  - On Ready           → auto-close + toast "โมเดลพร้อมใช้งาน"
-  //  - On Failed          → error + "ลองอีกครั้ง" retry button
-  //  - Cancel             → popModal (download continues in background)
+  // Rendered as a native `<dialog>` with `showModal()` — required to
+  // stack ABOVE another native dialog (e.g. SettingsModal).  A plain
+  // div can never cover a native-dialog top-layer.
 
   interface Props {
     /** Specific model to download. If null/undefined, downloads the active model. */
@@ -28,6 +26,16 @@
   const MODAL_ID = 'model-download';
 
   let downloading = $state(false);
+  let dialogEl = $state<HTMLDialogElement | null>(null);
+
+  // Promote to the browser top-layer as soon as the dialog renders —
+  // otherwise another open `<dialog>` (SettingsModal) covers us.
+  onMount(() => {
+    // Defer to next microtask so the element is actually in the DOM.
+    queueMicrotask(() => {
+      if (dialogEl && !dialogEl.open) dialogEl.showModal();
+    });
+  });
   // Only react to Ready once the user has actually kicked off the
   // download.  Without this flag the modal would auto-close on mount
   // whenever the active model was already loaded (its `modelStatus` is
@@ -61,6 +69,7 @@
 
   function handleCancel() {
     onDone?.();
+    if (dialogEl?.open) dialogEl.close();
     ui.popModal(MODAL_ID);
   }
 
@@ -72,6 +81,7 @@
     if (started && status?.type === 'ready') {
       ui.showToast('โมเดลพร้อมใช้งาน', 'success');
       onDone?.();
+      if (dialogEl?.open) dialogEl.close();
       ui.popModal(MODAL_ID);
     }
   });
@@ -89,67 +99,59 @@
   });
 </script>
 
-<div class="backdrop" role="dialog" aria-modal="true" aria-labelledby="mdm-title">
-  <div class="modal">
-    <header class="header">
-      <h2 id="mdm-title">ดาวน์โหลดโมเดลแปลภาษา</h2>
-      <button type="button" class="close" aria-label="Close" onclick={handleCancel}>
-        <X size={16} strokeWidth={1.5} />
-      </button>
-    </header>
+<dialog bind:this={dialogEl} class="modal" aria-labelledby="mdm-title" onclose={handleCancel}>
+  <header class="header">
+    <h2 id="mdm-title">ดาวน์โหลดโมเดลแปลภาษา</h2>
+    <button type="button" class="close" aria-label="Close" onclick={handleCancel}>
+      <X size={16} strokeWidth={1.5} />
+    </button>
+  </header>
 
-    <div class="body">
-      {#if status?.type === 'not_installed' || (status?.type !== 'downloading' && status?.type !== 'failed' && status?.type !== 'ready')}
-        <p class="description">
-          ฟีเจอร์แปลภาษาต้องใช้โมเดลซึ่งมีขนาดหลายร้อย MB ดาวน์โหลดเพียงครั้งเดียว
-          และทำงานแบบออฟไลน์หลังจากนั้น ไม่มีการส่งข้อมูลออกสู่อินเทอร์เน็ต
-        </p>
-      {:else if status?.type === 'downloading'}
-        <p class="description">กำลังดาวน์โหลดโมเดล กรุณารอสักครู่…</p>
-        <div class="progress-wrap">
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: {progressPercent()}%"></div>
-          </div>
-          <div class="progress-meta">
-            <span class="bv-mono">{progressLabel()}</span>
-            <span class="bv-mono">{progressPercent()}%</span>
-          </div>
+  <div class="body">
+    {#if status?.type === 'not_installed' || (status?.type !== 'downloading' && status?.type !== 'failed' && status?.type !== 'ready')}
+      <p class="description">
+        ฟีเจอร์แปลภาษาต้องใช้โมเดลซึ่งมีขนาดหลายร้อย MB ดาวน์โหลดเพียงครั้งเดียว
+        และทำงานแบบออฟไลน์หลังจากนั้น ไม่มีการส่งข้อมูลออกสู่อินเทอร์เน็ต
+      </p>
+    {:else if status?.type === 'downloading'}
+      <p class="description">กำลังดาวน์โหลดโมเดล กรุณารอสักครู่…</p>
+      <div class="progress-wrap">
+        <div class="progress-bar">
+          <div class="progress-fill" style="width: {progressPercent()}%"></div>
         </div>
-      {:else if status?.type === 'failed'}
-        <p class="description error-text">
-          ดาวน์โหลดล้มเหลว: {status.message}
-        </p>
-        <p class="hint">กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองอีกครั้ง</p>
-      {/if}
-    </div>
-
-    <footer class="footer">
-      <button type="button" class="btn ghost" onclick={handleCancel}> ยกเลิก </button>
-      <div class="spacer"></div>
-      {#if status?.type === 'failed'}
-        <button type="button" class="btn accent" onclick={handleDownload} disabled={downloading}>
-          ลองอีกครั้ง
-        </button>
-      {:else if status?.type !== 'downloading'}
-        <button type="button" class="btn accent" onclick={handleDownload} disabled={downloading}>
-          {downloading ? 'กำลังเตรียม…' : 'ดาวน์โหลดโมเดล'}
-        </button>
-      {/if}
-    </footer>
+        <div class="progress-meta">
+          <span class="bv-mono">{progressLabel()}</span>
+          <span class="bv-mono">{progressPercent()}%</span>
+        </div>
+      </div>
+    {:else if status?.type === 'failed'}
+      <p class="description error-text">
+        ดาวน์โหลดล้มเหลว: {status.message}
+      </p>
+      <p class="hint">กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองอีกครั้ง</p>
+    {/if}
   </div>
-</div>
+
+  <footer class="footer">
+    <button type="button" class="btn ghost" onclick={handleCancel}> ยกเลิก </button>
+    <div class="spacer"></div>
+    {#if status?.type === 'failed'}
+      <button type="button" class="btn accent" onclick={handleDownload} disabled={downloading}>
+        ลองอีกครั้ง
+      </button>
+    {:else if status?.type !== 'downloading'}
+      <button type="button" class="btn accent" onclick={handleDownload} disabled={downloading}>
+        {downloading ? 'กำลังเตรียม…' : 'ดาวน์โหลดโมเดล'}
+      </button>
+    {/if}
+  </footer>
+</dialog>
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 200;
-  }
-
+  /* Native <dialog> styling — `::backdrop` replaces the old .backdrop div.
+     The browser puts the dialog in the top layer when `showModal()` is
+     called, so no z-index is needed even when stacked over another open
+     `<dialog>` (e.g. SettingsModal). */
   .modal {
     background: var(--bv-surface);
     color: var(--bv-text);
@@ -159,6 +161,10 @@
     width: 480px;
     max-width: calc(100vw - 48px);
     font-family: var(--bv-font-body);
+  }
+
+  .modal::backdrop {
+    background: rgba(0, 0, 0, 0.45);
   }
 
   .header {

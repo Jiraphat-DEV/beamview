@@ -33,6 +33,17 @@ use tokenizers::Tokenizer;
 
 use crate::translation::types::TranslateError;
 
+// ── CoreML cache directory ────────────────────────────────────────────────────
+
+/// Where the CoreML compiled model artefacts are cached between launches.
+/// Using a persistent cache avoids the 10–30 s compile-on-first-use overhead
+/// on every app restart.  The directory is created lazily by the ORT runtime.
+#[cfg(target_os = "macos")]
+fn coreml_cache_dir() -> Option<std::path::PathBuf> {
+    directories::ProjectDirs::from("com", "beamview", "Beamview")
+        .map(|proj| proj.cache_dir().join("coreml"))
+}
+
 // ── NLLB token constants ──────────────────────────────────────────────────────
 
 /// `eng_Latn` special token id (256047).
@@ -90,23 +101,16 @@ impl Translator {
             return Err(TranslateError::ModelNotReady);
         }
 
-        let encoder = Session::builder()
-            .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?
-            .with_intra_threads(1)
-            .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?
-            .commit_from_file(&encoder_path)
-            .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?;
-
-        let decoder = Session::builder()
-            .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?
-            .with_intra_threads(2)
-            .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?
-            .commit_from_file(&decoder_path)
-            .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?;
+        // ── Build execution-provider list ──────────────────────────────────────
+        // On macOS we prefer CoreML (targets Apple Neural Engine / Metal GPU)
+        // and fall back to CPU automatically if CoreML rejects the model
+        // (e.g. unsupported quantization layout).  ORT logs a warning and
+        // continues on the CPU provider — the session build does NOT fail.
+        //
+        // On Linux / Windows the CoreML feature is not compiled in, so only
+        // the CPU provider is registered.
+        let encoder = build_session(&encoder_path, 1)?;
+        let decoder = build_session(&decoder_path, 2)?;
 
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| TranslateError::Tokenizer(e.to_string()))?;
@@ -409,6 +413,78 @@ fn greedy_argmax(flat: &[f32], vocab_len: usize) -> i64 {
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less))
         .map(|(idx, _)| idx as i64)
         .unwrap_or(EOS_TOKEN_ID)
+}
+
+// ── Session builder helper ────────────────────────────────────────────────────
+
+/// Build an ORT session from `model_path` using the best available execution
+/// provider on this platform.
+///
+/// On macOS the session is configured with:
+///   1. CoreML EP (targeting CPU + Neural Engine — widest compatibility)
+///   2. CPU EP as automatic fallback
+///
+/// If CoreML cannot support the model's operators (e.g. int8 quantisation
+/// layout is unsupported), ORT logs a warning and silently falls back to CPU.
+/// The session creation itself does not fail in this case.
+///
+/// On Linux / Windows only the CPU provider is registered (the `coreml` Cargo
+/// feature is not compiled in for those targets).
+fn build_session(model_path: &Path, intra_threads: usize) -> Result<Session, TranslateError> {
+    let mut builder = Session::builder()
+        .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?
+        .with_optimization_level(GraphOptimizationLevel::Level3)
+        .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?
+        .with_intra_threads(intra_threads)
+        .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?;
+
+    // Register execution providers.  The list is tried left-to-right; any EP
+    // that cannot handle a subgraph falls back to the next in the list.
+    // `fail_silently()` is the default, so a missing / incompatible CoreML EP
+    // only logs a warning rather than returning an error.
+    #[cfg(target_os = "macos")]
+    {
+        use ort::ep;
+
+        // Cache compiled CoreML artefacts between launches so the second
+        // session load is fast.  If we can't determine the cache dir we
+        // skip caching — CoreML still works, just recompiles each launch.
+        let coreml_ep = if let Some(cache) = coreml_cache_dir() {
+            log::info!("[translator] CoreML cache dir: {}", cache.display());
+            ep::CoreML::default()
+                .with_compute_units(ep::coreml::ComputeUnits::CPUAndNeuralEngine)
+                .with_model_cache_dir(cache.to_string_lossy())
+                .build()
+        } else {
+            ep::CoreML::default()
+                .with_compute_units(ep::coreml::ComputeUnits::CPUAndNeuralEngine)
+                .build()
+        };
+
+        builder = builder
+            .with_execution_providers([coreml_ep, ep::CPU::default().build()])
+            .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?;
+
+        log::info!(
+            "[translator] Session EPs: CoreML (CPUAndNeuralEngine) + CPU fallback for {}",
+            model_path.file_name().unwrap_or_default().to_string_lossy()
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use ort::ep;
+        builder = builder
+            .with_execution_providers([ep::CPU::default().build()])
+            .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))?;
+        log::info!(
+            "[translator] Session EP: CPU only for {}",
+            model_path.file_name().unwrap_or_default().to_string_lossy()
+        );
+    }
+
+    builder
+        .commit_from_file(model_path)
+        .map_err(|e| TranslateError::DeviceInitFailed(e.to_string()))
 }
 
 // ── From<ort::Error> ──────────────────────────────────────────────────────────

@@ -41,15 +41,25 @@ futures-util = "0.3"
 ort = { version = "2.0.0-rc.12", default-features = false, features = ["download-binaries", "ndarray", "tls-native", "std"] }
 ndarray = { version = "0.17", features = ["std"] }
 
-# Apple Vision Framework bindings — only compile on macOS. The source
-# code in `src/translation/ocr.rs` is gated with `#[cfg(target_os = "macos")]`,
-# so pairing Cargo-level gating keeps cross-platform `cargo check` green
-# for future Windows / Linux ports.
+# Apple-platform-specific dependencies — only compile on macOS.
+# The source code in `src/translation/ocr.rs` and the CoreML provider
+# usage in `src/translation/translator.rs` are gated with
+# `#[cfg(target_os = "macos")]`, so pairing Cargo-level gating keeps
+# cross-platform `cargo check` green for future Windows / Linux ports.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-vision = "0.3"
 objc2-foundation = "0.3"
 objc2-core-graphics = "0.3"
+
+# CoreML execution provider for ort — targets Apple Neural Engine / GPU.
+# Only enabled on macOS so Linux CI builds remain clean.
+# The `coreml` feature is gated with `cfg(target_os = "macos")` so the
+# linker only sees the CoreML symbols on Apple platforms.
+[target.'cfg(target_os = "macos")'.dependencies.ort]
+version = "2.0.0-rc.12"
+default-features = false
+features = ["download-binaries", "ndarray", "tls-native", "std", "coreml"]
 
 [dev-dependencies]
 tempfile = "3"

@@ -48,6 +48,88 @@ use crate::translation::{
 /// writes to it; the `get_translation_model_status` command reads from it.
 pub type ModelStatusHandle = Arc<RwLock<ModelStatus>>;
 
+// ── CallStats ─────────────────────────────────────────────────────────────────
+
+/// Rolling counters emitted as a single summary log line every `STATS_INTERVAL`
+/// calls.  This makes cache effectiveness easy to assess from the log file
+/// after a real gameplay session without requiring a debug UI.
+struct CallStats {
+    /// Number of calls since the last log flush.
+    total: u64,
+    /// OCR-to-NLLB translation calls (model was invoked).
+    translations: u64,
+    /// Hits served from the LRU cache.
+    cache_hits: u64,
+    /// Near-duplicate frames skipped via jaro-winkler dedup.
+    duplicates: u64,
+    /// Accumulated translation latency (ms) for the translation bucket only.
+    latency_sum_ms: u64,
+    /// Number of translation calls counted in `latency_sum_ms`.
+    latency_count: u64,
+}
+
+/// Log a summary line every N calls (≈ once per minute at 1 fps).
+const STATS_INTERVAL: u64 = 60;
+
+impl CallStats {
+    fn new() -> Self {
+        Self {
+            total: 0,
+            translations: 0,
+            cache_hits: 0,
+            duplicates: 0,
+            latency_sum_ms: 0,
+            latency_count: 0,
+        }
+    }
+
+    fn record_translation(&mut self, latency_ms: u64) {
+        self.total += 1;
+        self.translations += 1;
+        self.latency_sum_ms += latency_ms;
+        self.latency_count += 1;
+        self.maybe_flush();
+    }
+
+    fn record_cache_hit(&mut self) {
+        self.total += 1;
+        self.cache_hits += 1;
+        self.maybe_flush();
+    }
+
+    fn record_duplicate(&mut self) {
+        self.total += 1;
+        self.duplicates += 1;
+        self.maybe_flush();
+    }
+
+    fn maybe_flush(&mut self) {
+        if self.total % STATS_INTERVAL != 0 {
+            return;
+        }
+        let median_ms = self
+            .latency_sum_ms
+            .checked_div(self.latency_count)
+            .unwrap_or(0);
+        let hit_pct = (self.cache_hits * 100).checked_div(self.total).unwrap_or(0);
+        log::info!(
+            "[translate] last {total} calls: {trans} translations / {hits} cache hits ({hit_pct}%) / {dups} duplicates — median latency {median_ms} ms",
+            total = STATS_INTERVAL,
+            trans = self.translations,
+            hits = self.cache_hits,
+            hit_pct = hit_pct,
+            dups = self.duplicates,
+            median_ms = median_ms
+        );
+        // Reset counters for the next window.
+        self.translations = 0;
+        self.cache_hits = 0;
+        self.duplicates = 0;
+        self.latency_sum_ms = 0;
+        self.latency_count = 0;
+    }
+}
+
 // ── TranslationEngine ─────────────────────────────────────────────────────────
 
 /// Composes ModelStore, Translator, and TranslationCache into a single
@@ -58,6 +140,8 @@ pub struct TranslationEngine {
     /// Lazily initialised after `ensure_ready` succeeds.
     translator: Option<Translator>,
     cache: TranslationCache,
+    /// Rolling statistics for cache-effectiveness logging.
+    stats: CallStats,
 }
 
 impl TranslationEngine {
@@ -76,6 +160,7 @@ impl TranslationEngine {
             model_store,
             translator: None,
             cache: TranslationCache::new(),
+            stats: CallStats::new(),
         };
         Ok((engine, status_handle))
     }
@@ -132,7 +217,11 @@ impl TranslationEngine {
         let model_dir = self.model_store.model_dir().to_owned();
         let translator = tokio::task::spawn_blocking(move || Translator::load(&model_dir))
             .await
-            .map_err(|e| EngineError::BlockingPanic(e.to_string()))??;
+            .map_err(|e| {
+                let msg = e.to_string();
+                log::error!("[engine] Translator::load panicked in blocking pool: {msg}");
+                EngineError::BlockingPanic(msg)
+            })??;
 
         self.translator = Some(translator);
 
@@ -159,7 +248,13 @@ impl TranslationEngine {
         let model_dir = self.model_store.model_dir().to_owned();
         let translator = tokio::task::spawn_blocking(move || Translator::load(&model_dir))
             .await
-            .map_err(|e| EngineError::BlockingPanic(e.to_string()))??;
+            .map_err(|e| {
+                let msg = e.to_string();
+                log::error!(
+                    "[engine] Translator::load panicked in blocking pool (auto-heal): {msg}"
+                );
+                EngineError::BlockingPanic(msg)
+            })??;
         self.translator = Some(translator);
         Ok(true)
     }
@@ -234,6 +329,7 @@ impl TranslationEngine {
             CacheLookup::Hit(th) => {
                 let latency_ms = start.elapsed().as_millis() as u64;
                 log::debug!("[translate] cache hit — {latency_ms}ms EN: {en_text}");
+                self.stats.record_cache_hit();
                 return Ok(Some(OcrTranslateResult {
                     en: en_text,
                     th,
@@ -245,6 +341,7 @@ impl TranslationEngine {
             CacheLookup::Duplicate => {
                 let latency_ms = start.elapsed().as_millis() as u64;
                 log::debug!("[translate] duplicate — {latency_ms}ms EN: {en_text}");
+                self.stats.record_duplicate();
                 // Return None so the frontend keeps the previous translation
                 // visible.  The caller must not clear the overlay on None.
                 return Ok(None);
@@ -274,8 +371,9 @@ impl TranslationEngine {
         let th_text = translate_result?;
         let latency_ms = start.elapsed().as_millis() as u64;
 
-        // ── 5. Cache insert + return ───────────────────────────────────────────
+        // ── 5. Cache insert + stats + return ──────────────────────────────────
         self.cache.insert(&en_text, th_text.clone());
+        self.stats.record_translation(latency_ms);
 
         log::info!("[translate] {latency_ms}ms EN: {en_text} → TH: {th_text}");
 
@@ -330,6 +428,7 @@ mod tests {
             model_store: ModelStore::new_with_dir(tmp.path().to_owned()),
             translator: None,
             cache: TranslationCache::new(),
+            stats: CallStats::new(),
         };
 
         // Confirm precondition: no sentinel, translator not loaded.

@@ -97,6 +97,85 @@ Target: **≤ 100 ms** end-to-end.
 
 ---
 
+## Phase 2 — Translation (v0.2.0)
+
+Prerequisites (in addition to Phase 1 prerequisites above):
+
+- Model files downloaded and installed at
+  `~/Library/Application Support/com.beamview.Beamview/models/nllb-200-distilled-600M/`
+- Game source material: a Nintendo Switch JRPG (Xenoblade Chronicles, Fire Emblem,
+  or Persona recommended) with English subtitles
+
+### T1. Setup — fresh install simulation
+
+- [ ] Delete the `.ready` sentinel at
+      `~/Library/Application Support/com.beamview.Beamview/models/nllb-200-distilled-600M/.ready`
+      to simulate a first-run user (or leave intact to test an upgrade path).
+
+### T2. First-run model download
+
+- [ ] Open Settings → การแปล tab.
+- [ ] Click "ดาวน์โหลดโมเดล" → `ModelDownloadModal` appears with a description of the ~650 MB download.
+- [ ] Click "ดาวน์โหลดโมเดล" inside the modal → progress bar advances, bytes/total and % update in real time.
+- [ ] Modal auto-closes when download completes → Toast "โมเดลพร้อมใช้งาน" appears briefly.
+
+### T3. Region calibration
+
+- [ ] In Settings → การแปล, click "เลือกพื้นที่ subtitle".
+- [ ] `RegionSelector` overlay shows a frozen frame of the current video.
+- [ ] Drag a rectangle over the game's dialog / subtitle area → click Save.
+- [ ] Settings panel shows a small region preview; region coordinates are non-zero.
+
+### T4. Cmd+T toggle
+
+- [ ] With model installed and region set, press `Cmd+T` → `TranslationOverlay` appears with Thai text within ~1–2 s.
+- [ ] Press `Cmd+T` again → overlay hides + Toast "การแปลปิดแล้ว".
+
+### T5. Cmd+T gating when model not installed
+
+- [ ] Delete the `.ready` sentinel (see T1), restart the app.
+- [ ] Press `Cmd+T` → `ModelDownloadModal` opens instead of toggling translation.
+- [ ] Cancel the modal; re-install the sentinel; restart to restore normal state.
+
+### T6. Offline mode
+
+- [ ] With the model installed, disable Wi-Fi / disconnect network.
+- [ ] Restart the app → Settings → การแปล shows "พร้อมใช้งาน" status (no re-download required).
+- [ ] Press `Cmd+T` → overlay appears with Thai text confirming offline inference works.
+
+### T7. Cache behaviour
+
+- [ ] Play through a cutscene with at least one line that repeats (e.g. a character name card or menu prompt).
+- [ ] Open DevTools (right-click → Inspect) or tail `~/Library/Logs/com.beamview.app/beamview.log`.
+- [ ] Confirm at least one `[translate] cache hit` log line with latency under 20 ms for the repeated line.
+- [ ] After ~60 calls, confirm a summary log line:
+      `[translate] last 60 calls: N translations / M cache hits (X%) / K duplicates — median latency Y ms`
+
+### T8. Config persistence
+
+- [ ] Enable translation, set FPS to 2, save Settings.
+- [ ] Quit and relaunch the app.
+- [ ] Settings → การแปล shows the same FPS value; translation is still enabled.
+- [ ] Inspect `~/Library/Application Support/com.beamview.app/config.json` — confirm
+      `"schema_version": 2` and a `"translation"` block with `"enabled": true` and `"fps": 2`.
+
+### T9. Render-path regression check
+
+- [ ] Run the Phase 1 latency photo test (§8 above) with translation **OFF** — record the baseline (should be ~51 ms).
+- [ ] Enable translation at 1 fps, run the same latency photo test with translation **ON**.
+- [ ] The delta between the two measurements must be under 2 ms.
+      If it exceeds 2 ms, file a bug before releasing.
+
+### T10. v1 config migration
+
+- [ ] Replace `~/Library/Application Support/com.beamview.app/config.json` with a v1 shape:
+      `{"schema_version":1,"theme":"system","welcome_dismissed":true}` (no `"translation"` key).
+- [ ] Relaunch the app.
+- [ ] Confirm `config.json` is rewritten with `"schema_version": 2` and a default `"translation"` block.
+- [ ] Confirm no crash and translation settings UI is functional.
+
+---
+
 ## Release workflow
 
 1. Merge `feat/milestone-8-release-prep` to `main`.

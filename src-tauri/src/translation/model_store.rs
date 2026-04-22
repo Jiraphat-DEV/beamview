@@ -23,6 +23,9 @@ use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
+/// How long to wait between the first attempt and the single automatic retry.
+const RETRY_BACKOFF_SECS: u64 = 2;
+
 use crate::translation::types::{ModelStatus, ModelStoreError};
 
 // ── Pinned download constants ─────────────────────────────────────────────────
@@ -173,8 +176,12 @@ impl ModelStore {
             }
 
             // Download to a `.partial` sibling, then atomic rename.
+            // One automatic retry with a short backoff for transient network
+            // failures (e.g. a brief Wi-Fi blip 4 minutes into a 5-minute
+            // download).  If the retry also fails the error is surfaced to the
+            // frontend as before.
             let partial = self.model_dir.join(format!("{}.partial", spec.filename));
-            downloaded_total += download_file(
+            let download_result = download_file(
                 &client,
                 spec.url,
                 &partial,
@@ -182,7 +189,32 @@ impl ModelStore {
                 TOTAL_BYTES_ESTIMATE,
                 &on_progress,
             )
-            .await?;
+            .await;
+
+            let file_bytes = match download_result {
+                Ok(n) => n,
+                Err(first_err) => {
+                    log::warn!(
+                        "[model_store] download of {} failed ({}), retrying in {}s…",
+                        spec.filename,
+                        first_err,
+                        RETRY_BACKOFF_SECS
+                    );
+                    // Remove any partial data so the retry starts clean.
+                    let _ = fs::remove_file(&partial).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(RETRY_BACKOFF_SECS)).await;
+                    download_file(
+                        &client,
+                        spec.url,
+                        &partial,
+                        downloaded_total,
+                        TOTAL_BYTES_ESTIMATE,
+                        &on_progress,
+                    )
+                    .await?
+                }
+            };
+            downloaded_total += file_bytes;
 
             // Verify hash before committing.
             let actual_hex = sha256_hex(&partial).await?;

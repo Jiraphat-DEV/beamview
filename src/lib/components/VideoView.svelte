@@ -81,14 +81,6 @@
     // and is not torn down when the stream drops and VideoView unmounts.
   });
 
-  // M3: Expose a debug harness on window.__beamviewDebug (DEV only).
-  // This allows end-to-end testing without any visible UI.
-  //
-  // Usage in DevTools:
-  //   window.__beamviewDebug.downloadModel()
-  //   window.__beamviewDebug.setRegion({ x: 0, y: 900, width: 1280, height: 120 })
-  //   window.__beamviewDebug.enableTranslation()
-  //   // watch the console for [translate] lines
   onMount(() => {
     // Sync the store with Rust's live model state — the Svelte singleton
     // resets to `not_installed` on every hot reload, but the Rust engine
@@ -96,21 +88,13 @@
     translation.refreshModelStatus();
 
     if (import.meta.env.DEV) {
-      // @ts-expect-error -- debug harness is intentionally untyped
+      // Minimal store inspector — exposes only the store reference so
+      // DevTools can read reactive state without coupling to internal APIs.
+      // Usage: window.__beamviewDebug.getTranslationStore()
+      // @ts-expect-error -- debug helper is intentionally untyped
       window.__beamviewDebug = {
         getTranslationStore: () => translation,
-        setRegion: (r: { x: number; y: number; width: number; height: number }) =>
-          translation.setRegion(r),
-        enableTranslation: () => {
-          translation.enabled = true;
-        },
-        disableTranslation: () => {
-          translation.enabled = false;
-        },
-        downloadModel: () => translation.downloadModel(),
-        refreshModelStatus: () => translation.refreshModelStatus(),
       };
-      console.info('[beamview] debug harness available at window.__beamviewDebug');
     }
   });
 </script>
